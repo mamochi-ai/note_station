@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#fcf8f0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>NOTE TRANSIT わたしの記事路線図</title>
+<link rel="stylesheet" href="css/app.css" data-nt-inline>
+</head>
+<body>
+<div id="app">
+  <!-- スタート -->
+  <section id="screen-start" class="screen" hidden>
+    <div class="start-card">
+      <p class="eyebrow">NOTE TRANSIT</p>
+      <h1>わたしの記事路線図</h1>
+      <p class="lead">noteの記事を、テーマ別の地下鉄路線図に。共通の言葉でつながる駅をたどって、書いてきたことを少し振り返れます。</p>
+      <div class="start-actions">
+        <label class="btn primary big file-btn">noteのZIPを選ぶ<input id="file-zip" type="file" accept=".zip,.xml,application/zip,application/x-zip-compressed,text/xml,application/xml"></label>
+        <button id="btn-sample" class="btn big" type="button">サンプルで試す</button>
+      </div>
+      <button id="btn-resume" class="btn link" type="button" hidden>前回の路線図を開く</button>
+      <ul class="fineprint">
+        <li>ファイルはこの端末の中だけで解析します。サーバーへ送信しません。</li>
+        <li>公開記事だけを使います。下書き・予約・状態不明の記事は除外します。</li>
+        <li>noteの設定 →「記事のエクスポート」で受け取ったZIPをそのまま選べます。</li>
+      </ul>
+      <p class="fineprint"><label class="btn link file-btn small">編集用JSONから復元<input id="file-restore" type="file" accept=".json,application/json"></label></p>
+    </div>
+  </section>
+
+  <!-- 取り込み結果 -->
+  <section id="screen-import" class="screen" hidden>
+    <div class="start-card wide">
+      <p class="eyebrow">取り込み結果</p>
+      <h2 id="imp-headline"></h2>
+      <div id="imp-body"></div>
+      <div class="start-actions">
+        <button id="btn-build" class="btn primary big" type="button">路線図をつくる</button>
+        <button id="btn-imp-back" class="btn" type="button">戻る</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 路線図 -->
+  <section id="screen-map" class="screen" hidden>
+    <div class="topstack" id="topstack">
+    <header class="hero">
+      <div class="hero-left">
+        <button id="btn-home" class="eyebrow-btn" type="button" aria-label="はじめの画面へ"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14zm0 0 8-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>NOTE TRANSIT</span><span id="site-name" class="site-name"></span></button>
+        <h1 id="map-title" class="hero-title"></h1>
+        <p class="tagline">書いてきたことが、つながって見える。<span id="viewer-badge" class="badge" hidden>閲覧モード</span></p>
+      </div>
+      <div class="hero-actions">
+        <button id="btn-edit" class="btn ghost" type="button" data-owner aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zm10-14 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>路線図を編集</button>
+        <button id="btn-save-img" class="btn ghost" type="button"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="2" fill="currentColor"/><path d="m4 18 6-5 4 3 3-2 4 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>画像で保存</button>
+        <button id="btn-share" class="btn primary" type="button" data-owner>共有</button>
+        <button id="btn-copy-own" class="btn primary" type="button" data-viewer hidden>自分用にコピー</button>
+      </div>
+    </header>
+    <nav class="toolbar" aria-label="操作">
+      <div class="seg" role="tablist" aria-label="遊び方">
+        <button type="button" data-mode="topic" role="tab">話題でつなぐ</button>
+        <button type="button" data-mode="time" role="tab">時間でたどる</button>
+        <button type="button" data-mode="surprise" role="tab">意外な乗換</button>
+      </div>
+      <div class="tb-right">
+        <button id="btn-regen" class="btn small" type="button" data-owner>別の路線図にする</button>
+        <button id="btn-prev-map" class="btn small" type="button" data-owner>前の図</button>
+        <button id="btn-analysis" class="btn small" type="button">振り返り</button>
+        <button id="btn-menu" class="btn small" type="button">メニュー</button>
+      </div>
+    </nav>
+    <div id="editbar" class="editbar" hidden>
+      <button id="btn-undo" class="btn small" type="button">↶ 取り消し</button>
+      <button id="btn-redo" class="btn small" type="button">↷ やり直し</button>
+      <button id="btn-multi" class="btn small" type="button" aria-pressed="false">まとめて選択</button>
+      <button id="btn-relayout" class="btn small" type="button">再配置</button>
+      <button id="btn-fix" class="btn small" type="button" aria-pressed="false">図を固定</button>
+      <button id="btn-edit-done" class="btn small primary" type="button">編集を終える</button>
+      <span class="hint">駅をドラッグで移動・駅をタップで名前や所属を編集</span>
+    </div>
+    </div>
+    <div class="main">
+      <div id="stage" class="stage" aria-label="路線図。ドラッグで移動、ピンチで拡大縮小">
+        <div id="svg-host"></div>
+        <div class="map-tools">
+          <button id="btn-zoom-in" class="icon-btn" type="button" aria-label="拡大">＋</button>
+          <button id="btn-zoom-out" class="icon-btn" type="button" aria-label="縮小">－</button>
+          <button id="btn-fit" class="icon-btn" type="button" aria-label="全体表示">⤢</button>
+          <button id="btn-search" class="icon-btn" type="button" aria-label="駅を検索">⌕</button>
+        </div>
+        <div id="lod-hint" class="lod-hint" hidden>拡大すると全駅名を表示</div>
+        <div id="chips" class="legend" aria-label="路線一覧"></div>
+      </div>
+      <aside id="panel" class="panel" hidden>
+        <div class="panel-head"><span class="grip" aria-hidden="true"></span><h3 id="panel-title"></h3><button id="btn-panel-close" class="icon-btn" type="button" aria-label="閉じる">×</button></div>
+        <div id="panel-body" class="panel-body"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 進捗 -->
+  <div id="progress" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="pg-msg">
+    <div class="modal-card">
+      <p id="pg-msg">読み込んでいます…</p>
+      <div class="bar"><div id="pg-bar"></div></div>
+      <button id="btn-cancel" class="btn" type="button">キャンセル</button>
+    </div>
+  </div>
+  <!-- 汎用ダイアログ -->
+  <div id="dialog" class="modal" hidden role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div id="dlg-body"></div>
+      <div id="dlg-actions" class="dlg-actions"></div>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</div>
+<input id="file-reimport" type="file" accept=".zip,.xml,application/zip,text/xml,application/xml" hidden>
+<input id="file-restore2" type="file" accept=".json,application/json" hidden>
+<script src="js/vendor/fflate.min.js" data-nt-inline></script>
+<script src="js/util.js" data-nt-inline></script>
+<script src="js/zip.js" data-nt-inline></script>
+<script src="js/wxr.js" data-nt-inline></script>
+<script src="js/text.js" data-nt-inline></script>
+<script src="js/classify.js" data-nt-inline></script>
+<script src="js/layout.js" data-nt-inline></script>
+<script src="js/render.js" data-nt-inline></script>
+<script src="js/share.js" data-nt-inline></script>
+<script src="js/store.js" data-nt-inline></script>
+<script src="js/analysis.js" data-nt-inline></script>
+<script src="js/demo.js" data-nt-inline></script>
+<script src="js/exporter.js" data-nt-inline></script>
+<script src="js/app.js" data-nt-inline></script>
+</body>
+</html>
