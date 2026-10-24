@@ -17,7 +17,7 @@
     const head = opts.title ? 120 : 0;
     const vb = { x: b.x - pad, y: b.y - pad - head, w: b.w + pad * 2, h: b.h + pad * 2 + head };
     const out = [];
-    out.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="${Math.round(vb.w)}" height="${Math.round(vb.h)}" font-family="${E(U.FONT)}" class="nt-map">`);
+    out.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="${Math.round(vb.w)}" height="${Math.round(vb.h)}" font-family="${E(U.FONT)}" class="nt-map${opts.intro ? ' nt-intro' : ''}">`);
     out.push('<defs>');
     out.push(`<filter id="nt-shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#5a4426" flood-opacity="0.18"/></filter>`);
     geo.vignettes.forEach((v, i) => out.push(`<clipPath id="nt-vc${i}"><rect x="${r1(v.x)}" y="${r1(v.y)}" width="${v.w}" height="${v.h}" rx="14"/></clipPath>`));
@@ -35,9 +35,16 @@
       out.push('</g>');
     }
 
+    // 強調：路線フォーカス（その路線だけ）／駅の選択（所属路線を残して、ほかを少し落ち着かせる）
     const focus = opts.focusLine || null;
+    const fset = focus ? new Set([focus]) : (opts.focusLines && opts.focusLines.size ? opts.focusLines : null);
+    const dimO = focus ? 0.16 : 0.4;
     const hl = opts.highlight || null;
-    const dimLine = (id) => (focus && id !== focus ? ' opacity="0.16"' : '');
+    const dimLine = (id) => (fset && !fset.has(id) ? ` opacity="${dimO}"` : '');
+    const stDim = (s) => (fset && s.id !== opts.selected && !s.lines.some((l) => fset.has(l)) ? ` opacity="${focus ? 0.22 : 0.45}"` : '');
+    // 初回の描画演出：駅は左上から順に現れる
+    const bx0 = b.x, bw0 = Math.max(1, b.w), by0 = b.y, bh0 = Math.max(1, b.h);
+    const delay = (x, y) => (opts.intro ? ` style="--d:${(0.25 + 0.5 * ((x - bx0) / bw0) + 0.25 * ((y - by0) / bh0)).toFixed(2)}s"` : '');
     // 画像カード（本人用・主要駅だけ）
     if (opts.vignetteHref && geo.vignettes.length) {
       out.push(`<g class="nt-vignettes" pointer-events="none"${focus ? ' opacity="0.3"' : ''}>`);
@@ -52,16 +59,22 @@
     // 路線
     out.push('<g class="nt-lines">');
     for (const l of geo.lines) {
-      out.push(`<g data-line="${E(l.id)}"${dimLine(l.id)}><path d="${l.d}" fill="none" stroke="${C.bg}" stroke-width="${l.width + 8}" stroke-linecap="round" stroke-linejoin="round"/><path d="${l.d}" fill="none" stroke="${E(l.color)}" stroke-width="${l.width}" stroke-linecap="round" stroke-linejoin="round"/></g>`);
+      // 下地（太い地色）を先に描くので、あとから描く路線が前の路線をわずかに途切れさせ、乗換でない交差と区別できる
+      out.push(`<g data-line="${E(l.id)}"${dimLine(l.id)}><path class="nt-path" pathLength="1" d="${l.d}" fill="none" stroke="${C.bg}" stroke-width="${l.width + 9}" stroke-linecap="round" stroke-linejoin="round"/><path class="nt-path" pathLength="1" d="${l.d}" fill="none" stroke="${E(l.color)}" stroke-width="${l.width}" stroke-linecap="round" stroke-linejoin="round"/></g>`);
+    }
+    // 終点の印（線に直交する短い棒）
+    for (const e of geo.ends || []) {
+      const px = -e.uy * 13, py = e.ux * 13;
+      out.push(`<path class="nt-end"${dimLine(e.line)} d="M${r1(e.x + px)} ${r1(e.y + py)} L${r1(e.x - px)} ${r1(e.y - py)}" stroke="${E(e.color)}" stroke-width="6" stroke-linecap="round"/>`);
     }
     out.push('</g>');
     // 延伸予定（記事ではない）
     if (geo.planned && !focus) {
       const p = geo.planned;
-      out.push(`<g class="nt-planned" pointer-events="none"><path d="M${r1(p.from.x)} ${r1(p.from.y)} H${r1(p.x - 18)}" stroke="${C.sub}" stroke-width="4" stroke-dasharray="0.1 11" stroke-linecap="round" fill="none"/>`);
+      out.push(`<g class="nt-planned" pointer-events="none"><path d="M${r1(p.from.x)} ${r1(p.from.y)} L${r1(p.x)} ${r1(p.y)}" stroke="${C.sub}" stroke-width="4" stroke-dasharray="0.1 11" stroke-linecap="round" fill="none"/>`);
       out.push(`<circle cx="${r1(p.x)}" cy="${r1(p.y)}" r="14" fill="${C.paper}" stroke="${C.sub}" stroke-width="3.5" stroke-dasharray="5 5"/>`);
-      out.push(`<text x="${r1(p.x)}" y="${r1(p.y + 40)}" text-anchor="middle" font-size="15" font-weight="700" fill="${C.ink}" stroke="${C.bg}" stroke-width="4" paint-order="stroke">${E(p.label)}</text>`);
-      out.push(`<text x="${r1(p.x)}" y="${r1(p.y + 60)}" text-anchor="middle" font-size="12" fill="${C.sub}">${E(p.sub)}</text></g>`);
+      out.push(`<text x="${r1(p.x)}" y="${r1(p.y + 36)}" text-anchor="middle" font-size="14" font-weight="700" fill="${C.ink}" stroke="${C.bg}" stroke-width="4" paint-order="stroke">${E(p.label)}</text>`);
+      out.push(`<text x="${r1(p.x)}" y="${r1(p.y + 54)}" text-anchor="middle" font-size="12" fill="${C.sub}" stroke="${C.bg}" stroke-width="3" paint-order="stroke">${E(p.sub)}</text></g>`);
     }
     // 連絡通路（意外な乗換）
     if (geo.links.length) {
@@ -73,7 +86,7 @@
     out.push('<g class="nt-badges">');
     for (const bd of geo.badges) {
       const w = bd.w;
-      out.push(`<g data-line="${E(bd.id)}" class="nt-badge"${dimLine(bd.id)}><rect x="${r1(bd.x - w - 4)}" y="${r1(bd.y - 20)}" width="${r1(w)}" height="40" rx="20" fill="${E(bd.color)}"/><text x="${r1(bd.x - w / 2 - 4)}" y="${r1(bd.y + 7)}" text-anchor="middle" font-size="19" font-weight="800" fill="#fff" letter-spacing="0.5">${E(bd.name)}</text></g>`);
+      out.push(`<g data-line="${E(bd.id)}" class="nt-badge"${dimLine(bd.id)}><rect x="${r1(bd.cx - w / 2)}" y="${r1(bd.cy - 18)}" width="${r1(w)}" height="36" rx="18" fill="${E(bd.color)}"/><text x="${r1(bd.cx)}" y="${r1(bd.cy + 6)}" text-anchor="middle" font-size="17" font-weight="800" fill="#fff" letter-spacing="0.5">${E(bd.name)}</text></g>`);
     }
     out.push('</g>');
     // 月の区切り（時間モード）
@@ -86,13 +99,14 @@
     out.push('<g class="nt-stations">');
     for (const s of geo.stations) {
       const sm = model.stations.get(s.id);
-      const dim = focus && !s.lines.includes(focus) ? ' opacity="0.22"' : (hl && !hl.has(s.id) ? ' opacity="0.35"' : '');
+      const dim = stDim(s) || (hl && !hl.has(s.id) ? ' opacity="0.35"' : '');
       const sel = opts.selected === s.id;
       const attrs = opts.interactive ? ` tabindex="0" role="button" aria-label="${E((sm.short || '') + '：' + (sm.title || ''))}"` : '';
       const x = r1(s.x), y = r1(s.y);
-      out.push(`<g class="nt-st" data-sid="${E(s.id)}"${attrs}${dim}>`);
-      if (opts.interactive) out.push(`<circle cx="${x}" cy="${y}" r="26" fill="transparent"/>`);
-      if (sel) out.push(`<circle cx="${x}" cy="${y}" r="${s.r + 20}" fill="${E(s.color)}" opacity="0.16"/><circle cx="${x}" cy="${y}" r="${s.r + 10}" fill="${E(s.color)}" opacity="0.22"/>`);
+      out.push(`<g class="nt-st${sel ? ' is-sel' : ''}" data-sid="${E(s.id)}"${attrs}${dim}${delay(s.x, s.y)}>`);
+      // 見た目は小さくても、指で押せる範囲は広く取る
+      if (opts.interactive) out.push(`<circle cx="${x}" cy="${y}" r="32" fill="transparent"/>`);
+      if (sel) out.push(`<circle class="nt-pulse" cx="${x}" cy="${y}" r="${s.r + 20}" fill="${E(s.color)}" opacity="0.18"/><circle cx="${x}" cy="${y}" r="${s.r + 9}" fill="${E(s.color)}" opacity="0.25"/>`);
       if (hl && hl.has(s.id)) out.push(`<circle cx="${x}" cy="${y}" r="${s.r + 10}" fill="#f2c94c" opacity="0.55"/>`);
       if (s.isolated) {
         out.push(`<circle cx="${x}" cy="${y}" r="12" fill="${C.paper}" stroke="#8c9491" stroke-width="3.5" stroke-dasharray="5 5"/>`);
@@ -108,8 +122,9 @@
     out.push(`<g class="nt-labels" font-size="${geo.FS}" font-weight="700" fill="${C.ink}" pointer-events="none">`);
     geo.labels.forEach((l, id) => {
       const s = geo.stations.find((x) => x.id === id);
-      const dim = focus && s && !s.lines.includes(focus) ? ' opacity="0.22"' : '';
-      out.push(`<text class="lod${l.pri}" x="${r1(l.x)}" y="${r1(l.y)}" stroke="${C.bg}" stroke-width="5" stroke-linejoin="round" paint-order="stroke"${dim}>${E(l.text)}</text>`);
+      const dim = s ? stDim(s) : '';
+      const sel = opts.selected === id ? ' is-sel' : '';
+      out.push(`<text class="lod${l.pri}${sel}" data-for="${E(id)}" x="${r1(l.x)}" y="${r1(l.y)}" stroke="${C.bg}" stroke-width="5" stroke-linejoin="round" paint-order="stroke"${dim}${s ? delay(s.x, s.y) : ''}>${E(l.text)}</text>`);
     });
     out.push('</g>');
     if (opts.title) out.push(`<text x="${vb.x + vb.w - 30}" y="${vb.y + vb.h - 22}" text-anchor="end" font-size="13" fill="${C.sub}" pointer-events="none">NOTE TRANSIT ・ ${model.stations.size}記事 ・ ${model.lines.length}路線</text>`);

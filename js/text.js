@@ -216,7 +216,7 @@
     return chars.slice(0, best).join('').replace(/[・\s]+$/, '') + '…';
   }
   function shortName(title, maxLen) {
-    maxLen = maxLen || 12;
+    maxLen = maxLen || 9;
     let t = String(title || '').normalize('NFKC');
     t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, ' ').replace(/\s+/g, ' ').trim();
     t = t.replace(/[（(][^（）()]*(配信日|更新|追記)[^（）()]*[)）]/g, '');

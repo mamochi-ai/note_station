@@ -5,6 +5,7 @@
   const U = NT.util;
   const $ = (s) => document.querySelector(s);
   const MAX_VERSIONS = 30;
+  const LAYOUT_V = 2; // 配置方式の版（2：乗換駅を軸に八方へ広がる配置）
 
   const S = {
     project: null, bodies: null, F: null, zip: null,
@@ -116,7 +117,7 @@
     const locked = prev ? prev.lines.filter((L) => L.locked).map((L) => U.clone(L)) : [];
     const arts = visibleArticles();
     const c = NT.classify.classify(arts, features(), { seed, locked });
-    const m = { id: U.uid('m'), seed, createdAt: new Date().toISOString(), favorite: false, label: '', lines: c.lines, assign: c.assign, links: c.links, pos: {}, manual: {}, fixed: false };
+    const m = { id: U.uid('m'), seed, createdAt: new Date().toISOString(), favorite: false, label: '', lines: c.lines, assign: c.assign, links: c.links, pos: {}, manual: {}, fixed: false, layoutV: LAYOUT_V };
     relayoutMap(m, true);
     S.project.maps.push(m);
     S.project.currentMap = m.id;
@@ -365,7 +366,8 @@
     document.querySelectorAll('[data-owner]').forEach((e) => { e.hidden = !owner; });
     document.querySelectorAll('[data-viewer]').forEach((e) => { e.hidden = owner; });
     $('#viewer-badge').hidden = owner;
-    $('#btn-analysis').hidden = !!(S.viewer && !S.viewer.opts.analysis);
+    document.documentElement.classList.add('on-map');
+    S.sel = null; S.focus = null; S.cardOpen = false; S.introPending = true;
     setEdit(false);
     const canTime = owner || S.viewer.opts.dates;
     const canSur = owner || S.viewer.links.length > 0;
@@ -433,6 +435,9 @@
       .filter((c) => c.p < 2).sort((x, y) => x.p - y.p || y.d.localeCompare(x.d)).slice(0, 4).map((c) => c.id);
     const ready = cands.filter((id) => S.vigUrls.has(id));
     const todo = cands.filter((id) => !S.vigUrls.has(id) && !S.vigTried.has(id));
+    // 初回の描画演出の最中は描き直さない（演出が終わってから画像を読む）
+    const wait = (S.introUntil || 0) - performance.now();
+    if (todo.length && wait > 0) { clearTimeout(S.vigT); S.vigT = setTimeout(() => renderMap(), wait + 50); return ready; }
     if (todo.length) {
       todo.forEach((id) => S.vigTried.add(id));
       Promise.all(todo.map((id) => loadImage(artById(id)).then((u) => { if (u) S.vigUrls.set(id, u); }).catch(() => {})))
@@ -466,20 +471,23 @@
     $('#site-name').textContent = S.viewer ? '' : ((S.project.site && S.project.site.title) || '');
     document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mode === S.mode)));
     const geo = geometry(model);
+    // 選んだ駅の所属路線を残して、ほかの路線を少し落ち着かせる
+    const selLines = S.sel && !S.focus ? new Set(model.lines.filter((L) => L.order.includes(S.sel)).map((L) => L.id)) : null;
+    const intro = !!(fit && S.introPending && !REDUCED.matches);
+    S.introPending = false;
+    if (intro) S.introUntil = performance.now() + 1600;
     const r = NT.render.svg(model, geo, {
-      interactive: true, selected: S.sel,
-      focusLine: S.focus, highlight: highlightSet(model), transparentBg: true, vignetteHref: (id) => S.vigUrls.get(id) || '',
+      interactive: true, selected: S.sel, intro,
+      focusLine: S.focus, focusLines: selLines, highlight: highlightSet(model), transparentBg: true, vignetteHref: (id) => S.vigUrls.get(id) || '',
     });
     const host = $('#svg-host');
     host.innerHTML = r.svg; // render.svg はすべての文字列をエスケープ済み
     S.svg = host.firstElementChild;
+    S.lodKey = null;
     S.svg.removeAttribute('width'); S.svg.removeAttribute('height');
     S.full = r.viewBox;
     renderChips(model);
-    if (S.panel && S.panel.kind === 'overview') refreshPanel();
-    else if (!S.panel) closePanel();
-    if (fit || !S.vb) fitTo(S.full, true); else applyVB();
-    $('#btn-prev-map').disabled = !S.project || S.viewer || S.project.maps.findIndex((m) => m.id === S.project.currentMap) <= 0;
+    if (fit || !S.vb) fitTo(S.full, true, true); else applyVB();
   }
 
   function legendMark(c) {
@@ -525,22 +533,77 @@
   /* ---------- パン・ピンチ ---------- */
   function stageSize() { const r = $('#stage').getBoundingClientRect(); return { w: Math.max(1, r.width), h: Math.max(1, r.height), left: r.left, top: r.top }; }
   // 見出し（上）と凡例（下）が重なる分を除いた領域に収める
+  const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const WIDE = window.matchMedia('(min-width: 900px) and (orientation: landscape), (min-width: 1100px)');
+  const isWide = () => WIDE.matches;
+  // 見出し（上）・凡例（下）・ズームボタン（右）・記事カード（下）が重なる分を除いた、地図の見える領域
   function insets() {
     const s = stageSize();
-    const top = Math.max(0, ($('#topstack').getBoundingClientRect().bottom || 0) - s.top - 10);
-    const lg = $('#chips').getBoundingClientRect();
-    const bottom = lg.height ? Math.max(0, s.top + s.h - lg.top) + 6 : 0;
-    return { top, bottom };
+    const top = Math.max(0, ($('#topstack').getBoundingClientRect().bottom || 0) - s.top - 6);
+    let bottom = 0;
+    const pn = $('#panel');
+    if (!pn.hidden && !isWide()) bottom = Math.max(0, s.top + s.h - pn.getBoundingClientRect().top) + 8;
+    else {
+      // 凡例と、その上の小さなズームボタン列の分
+      const tl = $('.map-tools').getBoundingClientRect(), lg = $('#chips').getBoundingClientRect();
+      const topOf = Math.min(tl.height ? tl.top : Infinity, lg.height ? lg.top : Infinity);
+      bottom = isFinite(topOf) ? Math.max(0, s.top + s.h - topOf) + 6 : 0;
+    }
+    return { top, bottom, right: 8, left: 8 };
   }
-  function fitTo(rect, auto) {
+  // rect を見える領域に収める。overview=true の自動表示では、小さくなりすぎるなら読める倍率で中心の乗換駅へ
+  function fitTo(rect, auto, overview) {
     const s = stageSize();
     const ins = insets();
-    const ah = Math.max(80, s.h - ins.top - ins.bottom);
-    const k = Math.max(rect.w / s.w, rect.h / ah) * 1.04;
-    const cy = rect.y + rect.h / 2 - ((ins.top - ins.bottom) / 2) * k;
-    S.vb = { x: rect.x + rect.w / 2 - (s.w * k) / 2, y: cy - (s.h * k) / 2, w: s.w * k, h: s.h * k };
+    const aw = Math.max(80, s.w - ins.left - ins.right), ah = Math.max(80, s.h - ins.top - ins.bottom);
+    let k = Math.max(rect.w / aw, rect.h / ah) * 1.04;
+    let cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    // 30駅までは全体を見渡す。それより多くて小さくなりすぎる時は、読める倍率で中心の乗換駅（なければ地図の中央付近）へ
+    if (overview && 1 / k < 0.36 && S.geo && S.geo.stations.length > 30) {
+      k = 1 / 0.62;
+      const mx = rect.x + rect.w / 2, my = rect.y + rect.h / 2;
+      const hub = S.geo.stations.slice().sort((a, b) => b.lines.length - a.lines.length || Math.hypot(a.x - mx, a.y - my) - Math.hypot(b.x - mx, b.y - my))[0];
+      cx = hub.x; cy = hub.y;
+    }
+    // 見える領域の中心が cx,cy になるように
+    const offX = ((ins.left - ins.right) / 2) * k, offY = ((ins.top - ins.bottom) / 2) * k;
+    S.vb = { x: cx - (s.w * k) / 2 - offX, y: cy - (s.h * k) / 2 - offY, w: s.w * k, h: s.h * k };
     S.autoFit = !!auto;
     applyVB();
+  }
+  // 滑らかに表示位置を変える（動きを減らす設定では即座に）
+  function animateVB(target, ms) {
+    if (!S.vb) { S.vb = target; applyVB(); return; }
+    cancelAnimationFrame(S.anim || 0);
+    if (REDUCED.matches) { S.vb = target; applyVB(); return; }
+    const from = Object.assign({}, S.vb), t0 = performance.now(), dur = ms || 340;
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / dur), e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      S.vb = { x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e, w: from.w + (target.w - from.w) * e, h: from.h + (target.h - from.h) * e };
+      applyVB();
+      if (t < 1) S.anim = requestAnimationFrame(step);
+    };
+    S.anim = requestAnimationFrame(step);
+  }
+  // 駅が見える領域に入るよう移動。center=true なら見える領域の中央へ（読みやすい倍率まで寄る）
+  function bringIntoView(id, center) {
+    if (!S.geo || !S.vb) return;
+    const st = S.geo.stations.find((x) => x.id === id);
+    if (!st) return;
+    const s = stageSize(), ins = insets();
+    let v = Object.assign({}, S.vb);
+    let k = v.w / s.w;
+    if (center && 1 / k < 0.6) { k = 1 / 0.75; v = { x: v.x, y: v.y, w: s.w * k, h: s.h * k }; }
+    const sx = (st.x - v.x) / k, sy = (st.y - v.y) / k;
+    const L = ins.left + 30, R = s.w - ins.right - 30, T = ins.top + 30, B = s.h - ins.bottom - 40;
+    let dx = 0, dy = 0;
+    if (center) { dx = sx - (L + R) / 2; dy = sy - (T + B) / 2; } else {
+      if (sx < L) dx = sx - L; else if (sx > R) dx = sx - R;
+      if (sy < T) dy = sy - T; else if (sy > B) dy = sy - B;
+    }
+    if (!dx && !dy && v.w === S.vb.w) return;
+    S.autoFit = false;
+    animateVB({ x: v.x + dx * k, y: v.y + dy * k, w: v.w, h: v.h });
   }
   function applyVB() {
     if (!S.svg || !S.vb) return;
@@ -548,9 +611,29 @@
     S.svg.setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
     S.lastW = stageSize().w; S.lastH = stageSize().h;
     const ppu = S.lastW / v.w;
-    S.svg.classList.toggle('far', ppu < 0.42);
-    S.svg.classList.toggle('veryfar', ppu < 0.2);
-    $('#lod-hint').hidden = !(ppu < 0.42);
+    // 遠景で出す重要な駅名は、画面上でおよそ10px以上になるよう少し大きく
+    S.svg.style.setProperty('--lf', U.clamp(10.5 / ppu, 17, 44).toFixed(1) + 'px');
+    S.svg.classList.toggle('far', ppu < 0.55);
+    const lodKey = (ppu < 0.55 ? 'f' : 'n') + Math.round(U.clamp(10.5 / ppu, 17, 44));
+    if (S.lodKey !== lodKey) { S.lodKey = lodKey; declutter(); }
+    S.svg.classList.toggle('veryfar', ppu < 0.14);
+    $('#lod-hint').hidden = !(ppu < 0.55);
+  }
+  // 遠景では大きめにした重要な駅名どうしが重ならないよう、優先順（乗換駅→始終点）に置けるものだけ表示
+  function declutter() {
+    if (!S.svg) return;
+    const texts = [...S.svg.querySelectorAll('.nt-labels text.lod1')];
+    texts.forEach((t) => t.classList.remove('nt-hid'));
+    if (!S.svg.classList.contains('far')) return;
+    const inter = new Set(S.geo ? S.geo.stations.filter((x) => x.inter).map((x) => x.id) : []);
+    const order = texts.map((t, i) => ({ t, i, w: t.classList.contains('is-sel') ? 0 : inter.has(t.getAttribute('data-for')) ? 1 : 2 })).sort((a, b) => a.w - b.w || a.i - b.i);
+    const kept = [];
+    for (const o of order) {
+      let b; try { b = o.t.getBBox(); } catch (e) { continue; }
+      const r = { x: b.x - 6, y: b.y - 3, w: b.width + 12, h: b.height + 6 };
+      if (kept.some((k) => r.x < k.x + k.w && k.x < r.x + r.w && r.y < k.y + k.h && k.y < r.y + r.h)) o.t.classList.add('nt-hid');
+      else kept.push(r);
+    }
   }
   function zoomAt(f, cx, cy) {
     S.autoFit = false;
@@ -672,7 +755,7 @@
   }
 
   function onTap(el) {
-    if (!el) { if (S.sel) { S.sel = null; renderMap(); if (S.panel && S.panel.kind === 'station') closePanel(); } return; }
+    if (!el) { if (S.sel) closePanel(); return; }
     const sid = el.getAttribute('data-sid');
     if (sid) {
       if (S.multi) {
@@ -686,30 +769,50 @@
   }
 
   function selectStation(id, center) {
+    const changed = S.sel !== id;
     S.sel = id;
+    S.autoFit = false; // カードが開いて表示領域が変わっても、全体表示に戻して視点を飛ばさない
+    if (changed) S.cardOpen = !!(center && S.cardOpen);
     renderMap();
-    if (center && S.geo) {
-      const st = S.geo.stations.find((s) => s.id === id);
-      if (st) { const w = Math.min(S.vb.w, 900), r = S.vb.h / S.vb.w; S.vb = { x: st.x - w / 2, y: st.y - (w * r) / 2, w, h: w * r }; applyVB(); }
-    }
     openPanel('station', id);
+    // カードの高さが決まってから、隠れる場合だけ最小限動かす（「次の駅」などは中央へ滑らかに）
+    requestAnimationFrame(() => bringIntoView(id, !!center));
     // キーボード操作時はフォーカスを維持
     const g = S.svg && S.svg.querySelector(`[data-sid="${CSS.escape(id)}"]`);
     if (g && document.activeElement && document.activeElement.closest && document.activeElement.closest('#stage')) g.focus();
   }
 
   /* ---------- パネル ---------- */
-  const WIDE = window.matchMedia('(min-width: 900px) and (orientation: landscape), (min-width: 1100px)');
-  function openPanel(kind, arg) { S.panel = { kind, arg }; $('#panel').hidden = false; refreshPanel(); }
-  // 広い画面では「選択中の記事」カードを常に出しておく（何も選んでいない時は案内）
+  function openPanel(kind, arg) {
+    S.panel = { kind, arg };
+    const pn = $('#panel');
+    pn.hidden = false;
+    pn.classList.toggle('tall', kind !== 'station');
+    pn.classList.toggle('expanded', kind === 'station' && !!S.cardOpen);
+    $('#screen-map').classList.add('card-open');
+    refreshPanel();
+  }
+  // カードを閉じて地図の閲覧に戻る（選んでいた駅の強調も解く）
   function closePanel() {
-    if (WIDE.matches && !$('#screen-map').hidden && S.model) { S.panel = { kind: 'overview' }; $('#panel').hidden = false; refreshPanel(); return; }
-    S.panel = null; $('#panel').hidden = true;
+    const wasStation = S.panel && S.panel.kind === 'station';
+    S.panel = null; S.cardOpen = false;
+    const pn = $('#panel');
+    pn.hidden = true; pn.classList.remove('expanded', 'tall');
+    $('#screen-map').classList.remove('card-open');
+    if (wasStation && S.sel) { S.sel = null; renderMap(); }
+  }
+  function setCardExpanded(v) {
+    if (!S.panel || S.panel.kind !== 'station') return;
+    S.cardOpen = !!v;
+    $('#panel').classList.toggle('expanded', S.cardOpen);
+    refreshPanel();
+    $('#panel-body').scrollTop = 0;
+    requestAnimationFrame(() => bringIntoView(S.sel, false));
   }
   function refreshPanel() {
     if (!S.panel) return;
     const { kind, arg } = S.panel;
-    const fn = { overview: panelOverview, station: panelStation, line: panelLine, multi: panelMulti, share: panelShare, analysis: panelAnalysis, menu: panelMenu, history: panelHistory, search: panelSearch, surprise: panelSurprise }[kind];
+    const fn = { station: panelStation, line: panelLine, multi: panelMulti, share: panelShare, analysis: panelAnalysis, menu: panelMenu, history: panelHistory, search: panelSearch, surprise: panelSurprise }[kind];
     if (!fn) return;
     const r = fn(arg);
     if (!r) { closePanel(); return; }
@@ -722,32 +825,6 @@
   }
   const ART = ['station', 'train', 'bridge', 'town', 'trees', 'clouds'];
   const artFor = (id) => ART[U.hash(String(id)) % ART.length];
-  const cardFoot = () => h('p', { class: 'card-foot' }, h('span', { 'aria-hidden': 'true' }, 'ⓘ'), '駅をタップすると、記事が開きます。');
-
-  function panelOverview() {
-    const model = S.model;
-    if (!model) return null;
-    const inter = new Map();
-    model.lines.forEach((L) => L.order.forEach((id) => inter.set(id, (inter.get(id) || 0) + 1)));
-    const nInter = [...inter.values()].filter((n) => n >= 2).length;
-    const modeText = {
-      topic: '共通の言葉でつながる記事を、同じ路線に並べています。駅は日付順です。',
-      time: '投稿した順に一本の線でたどります。駅の色は話題の路線です。',
-      surprise: '主路線がちがうのに、めずらしい共通語でつながる記事を点線で結んでいます。',
-    }[model.mode];
-    return { title: '選択中の記事', body: [
-      h('div', { class: 'art decor' }, h('img', { src: decorHref('station'), alt: '' })),
-      h('p', { class: 'card-name' }, '駅を選んでください'),
-      h('p', { class: 'card-title' }, modeText),
-      h('div', { class: 'pills' }, model.lines.map((L) => lineChip(L, `${L.order.length}`))),
-      h('hr', { class: 'card-sep' }),
-      h('div', { class: 'stat-grid' },
-        h('div', { class: 'stat' }, h('b', {}, model.stations.size), h('span', {}, '記事')),
-        h('div', { class: 'stat' }, h('b', {}, model.lines.length), h('span', {}, '路線')),
-        h('div', { class: 'stat' }, h('b', {}, nInter), h('span', {}, '乗換駅'))),
-      cardFoot(),
-    ] };
-  }
 
   function sharedReason(a, b) {
     if (!S.viewer) {
@@ -758,72 +835,96 @@
     return [...A].filter((x) => B.has(x)).slice(0, 4).map((x) => NT.text.MOTIF_LABEL[x] || x);
   }
 
+  const q = (arr) => arr.map((t) => `『${t}』`).join('');
+  // 「このつながりの理由」：実際に共通する語だけを短い文で（意味を推測した説明はしない）
+  function reasonSentences(id, lines) {
+    const out = [];
+    const model = S.model;
+    for (const L of lines) {
+      const i = L.order.indexOf(id);
+      const full = !S.viewer && curMap().lines.find((x) => x.id === L.id);
+      if (full && full.vocab && full.vocab.length) {
+        const d = features().byId.get(id);
+        const mine = full.vocab.filter((t) => d && d.strong.has(t)).slice(0, 3).map((t) => NT.text.MOTIF_LABEL[t] || t);
+        if (mine.length) out.push(`${L.name}は、${q(mine)}などの言葉でつながっています。`);
+      }
+      for (const [nb, label] of [[L.order[i - 1], '前の駅'], [L.order[i + 1], '次の駅']]) {
+        if (!nb) continue;
+        const t = sharedReason(id, nb).slice(0, 3);
+        const name = model.stations.get(nb).short;
+        out.push(t.length ? `${label}「${name}」とは、${q(t)}という言葉が共通しています。` : `${label}「${name}」とは直接の共通語はなく、路線の言葉でつながっています。`);
+      }
+    }
+    if (!lines.length) out.push('ほかの記事と共通する特徴的な言葉が見つからなかったので、無理につながず「ひとり駅」にしています。');
+    const links = (S.mode === 'surprise' ? model.links : []).filter((k) => k.a === id || k.b === id);
+    for (const k of links) {
+      const o = model.stations.get(k.a === id ? k.b : k.a).short;
+      out.push(k.term ? `「${o}」とは、全体ではめずらしい${q([NT.text.MOTIF_LABEL[k.term] || k.term])}という言葉が共通しています（意外な乗換）。` : `「${o}」と意外な乗換でつながっています（共通語はタイトルの外にあるため表示しません）。`);
+    }
+    if (S.viewer) out.push('閲覧モードでは、共有されたタイトルだけから共通語を探しています。');
+    return out;
+  }
+
   function panelStation(id) {
     const model = S.model; const s = model && model.stations.get(id);
     if (!s) return null;
     const a = S.viewer ? null : artById(id);
-    const body = [];
     const lines = model.lines.filter((L) => L.order.includes(id));
-    // 画像：見出し画像候補（本人用）があればそれを、なければ装飾の水彩
-    const art = h('div', { class: 'art decor' }, h('img', { src: decorHref(artFor(id)), alt: '' }));
-    if (a && a.images && a.images.length && !a.imageHidden) {
-      loadImage(a).then((url) => { if (url) { art.className = 'art'; art.replaceChildren(h('img', { src: url, alt: '見出し画像候補' }), h('span', { class: 'art-note' }, '見出し画像候補（本人だけに表示）')); } });
-    }
-    body.push(art);
-    body.push(h('p', { class: 'card-name' }, s.short));
-    body.push(h('p', { class: 'card-title' }, s.title));
-    if (lines.length) body.push(h('div', { class: 'pills' }, lines.map((L) => lineChip(L, lines.length > 1 ? (L.id === s.main ? '主' : '副') : ''))));
-    else body.push(h('p', { class: 'reason' }, 'ひとり駅：他の記事と共有する特徴語が見つからなかったため、無理につないでいません。'));
-    body.push(h('hr', { class: 'card-sep' }));
-    if (s.url) {
-      const demo = s.url.startsWith(NT.demo.BASE);
-      body.push(h('a', { class: 'btn read-btn', href: s.url, target: '_blank', rel: 'noopener noreferrer' }, demo ? '記事を開く（架空のURL）' : 'noteでこの記事を読む', h('span', { 'aria-hidden': 'true' }, '↗')));
-    } else body.push(h('span', { class: 'read-btn disabled' }, '元記事のURLがありません'));
-    body.push(cardFoot());
-    body.push(h('h4', {}, 'この駅について'));
-    body.push(h('p', { class: 'meta' }, s.date ? '公開日：' + U.fmtDate(s.date) : (S.viewer && !S.viewer.opts.dates ? '公開日：共有されていません' : '公開日：不明')));
-    if (a && a.warnings && a.warnings.length) body.push(h('p', { class: 'warn' }, '注意：' + a.warnings.join('・')));
-
-    // 接点の理由（実際の共通語だけ）
+    const full = isWide() || S.cardOpen;
+    const body = [];
+    // 1) 小さなカード：正式タイトルを主役に、路線は小さなタグで
+    body.push(h('div', { class: 'st-tags' }, lines.length
+      ? lines.map((L) => h('button', { type: 'button', class: 'tag', style: `background:${L.color}`, onclick: () => transferTo(L.id), 'aria-label': `${L.name}を見る` }, L.name))
+      : h('span', { class: 'tag iso' }, 'ひとり駅')));
+    body.push(h('h2', { class: 'card-title' }, s.title));
+    const date = s.date ? U.fmtDate(s.date) : (S.viewer && !S.viewer.opts.dates ? '公開日は共有されていません' : '公開日不明');
+    body.push(h('p', { class: 'card-date' }, date));
+    const demo = s.url && s.url.startsWith(NT.demo.BASE);
+    const read = s.url && !demo
+      ? h('a', { class: 'btn read-btn', href: s.url, target: '_blank', rel: 'noopener noreferrer' }, 'noteで読む', h('span', { 'aria-hidden': 'true' }, '↗'))
+      : h('span', { class: 'read-btn disabled' }, demo ? 'デモ記事のためリンクはありません' : '元記事のURLがありません');
+    body.push(h('div', { class: 'card-row' }, read,
+      isWide() ? null : h('button', { type: 'button', class: 'more-btn', 'aria-expanded': String(!!S.cardOpen), onclick: () => setCardExpanded(!S.cardOpen) }, S.cardOpen ? 'たたむ' : '詳しく見る')));
+    if (!full) return { title: '', body };
+    // 2) 詳細：前後の駅・乗り換え・理由
+    const det = h('div', { class: 'card-detail' });
     for (const L of lines) {
       const i = L.order.indexOf(id);
       const prev = L.order[i - 1], next = L.order[i + 1];
-      const rows = [];
-      for (const [nb, label] of [[prev, '前の駅'], [next, '次の駅']]) {
-        if (!nb) continue;
-        const t = sharedReason(id, nb);
-        rows.push(h('div', {}, `${label}「${model.stations.get(nb).short}」と `, t.length ? h('span', {}, '共通語：', h('b', {}, t.join('・'))) : h('span', {}, '直接の共通語はありません（路線の共通語でつながっています）')));
-      }
-      const full = !S.viewer && curMap().lines.find((x) => x.id === L.id);
-      if (full && full.vocab && full.vocab.length) {
-        const d = features().byId.get(id);
-        const mine = full.vocab.filter((t) => d && d.strong.has(t));
-        if (mine.length) rows.unshift(h('div', {}, `${L.name}の共通語：`, h('b', {}, mine.map((t) => NT.text.MOTIF_LABEL[t] || t).join('・'))));
-      }
-      if (rows.length) body.push(h('div', { class: 'reason' }, rows));
-      body.push(h('div', { class: 'row' },
-        prev ? btn(`◀ ${model.stations.get(prev).short}`, () => selectStation(prev, true)) : null,
-        next ? btn(`${model.stations.get(next).short} ▶`, () => selectStation(next, true)) : null));
+      det.append(h('p', { class: 'nav-line' }, h('i', { style: `background:${L.color}` }), `${L.name}（${i + 1} / ${L.order.length}駅）`));
+      det.append(h('div', { class: 'nav-row' },
+        prev ? btn(`‹ ${model.stations.get(prev).short}`, () => selectStation(prev, true), 'small', { 'aria-label': `前の駅：${model.stations.get(prev).short}` }) : h('span', { class: 'btn small', style: 'visibility:hidden;flex:1' }, '・'),
+        next ? btn(`${model.stations.get(next).short} ›`, () => selectStation(next, true), 'small next', { 'aria-label': `次の駅：${model.stations.get(next).short}` }) : h('span', { class: 'meta', style: 'flex:1;text-align:right;align-self:center' }, '終点')));
     }
-    if (S.viewer) body.push(h('p', { class: 'meta' }, '閲覧モードの共通語は、共有されたタイトルだけから計算しています。'));
-    const links = (S.mode === 'surprise' ? model.links : []).filter((k) => k.a === id || k.b === id);
-    if (links.length) {
-      body.push(h('h4', {}, '意外な乗換'));
-      for (const k of links) {
-        const o = k.a === id ? k.b : k.a;
-        body.push(h('div', { class: 'reason' }, `「${model.stations.get(o).short}」へ `, k.term ? h('span', {}, '珍しい共通語：', h('b', {}, NT.text.MOTIF_LABEL[k.term] || k.term)) : '（共通語はタイトル外のため非表示）', ' ', btn('移動', () => selectStation(o, true))));
-      }
+    if (lines.length > 1) {
+      det.append(h('h4', {}, 'この駅で乗り換え'), h('div', { class: 'pills' }, lines.map((L) => h('button', { type: 'button', class: 'pill', style: `background:${L.color}`, onclick: () => transferTo(L.id) }, `${L.name}へ`))));
     }
+    const why = h('details', { class: 'why' }, h('summary', {}, 'このつながりの理由'), reasonSentences(id, lines).map((t) => h('p', {}, t)));
+    det.append(why);
+    if (s.short && s.short !== s.title) det.append(h('p', { class: 'meta' }, `地図での駅名：${s.short}`));
+    if (a && a.warnings && a.warnings.length) det.append(h('p', { class: 'warn' }, '注意：' + a.warnings.join('・')));
     // 見出し画像候補（本人用）
     if (a && a.images && a.images.length) {
-      body.push(h('h4', {}, '見出し画像候補'));
-      body.push(h('p', { class: 'meta' }, a.imageHidden ? '非表示にしています。' : `本文の${a.imageChoice % a.images.length + 1}番目の画像（全${a.images.length}枚）。正式な見出し画像とは限りません。端末内だけで表示し、共有・書き出しには含めません。ZIPを読み込んでいない時は、以前表示した縮小画像だけが出ます。`));
-      body.push(h('div', { class: 'row' },
+      det.append(h('h4', {}, '見出し画像候補'));
+      if (!a.imageHidden) {
+        const art = h('div', { class: 'art' });
+        loadImage(a).then((url) => { if (url) art.replaceChildren(h('img', { src: url, alt: '見出し画像候補' }), h('span', { class: 'art-note' }, '本人だけに表示')); else art.remove(); });
+        det.append(art);
+      }
+      det.append(h('p', { class: 'meta' }, a.imageHidden ? '非表示にしています。' : `本文の${a.imageChoice % a.images.length + 1}番目の画像（全${a.images.length}枚）。正式な見出し画像とは限りません。共有・書き出しには含めません。`));
+      det.append(h('div', { class: 'row' },
         a.images.length > 1 && !a.imageHidden ? btn('別の候補', () => { a.imageChoice = (a.imageChoice + 1) % a.images.length; S.vigUrls.delete(a.id); S.vigTried.delete(a.id); save(); renderMap(); refreshPanel(); }) : null,
         btn(a.imageHidden ? '表示する' : '非表示にする', () => { a.imageHidden = !a.imageHidden; save(); renderMap(); refreshPanel(); })));
     }
-    if (S.edit && a) body.push(editStation(a, s));
-    return { title: '選択中の記事', body };
+    if (S.edit && a) det.append(editStation(a, s));
+    body.push(det);
+    return { title: '', body };
+  }
+  // 乗り換え：その路線を強調して見渡す（記事カードは開いたまま）
+  function transferTo(lineId) {
+    S.focus = S.focus === lineId ? null : lineId;
+    renderMap();
+    renderChips(S.model);
   }
 
   function editStation(a, s) {
@@ -1132,6 +1233,15 @@
   /* ---------- メニュー ---------- */
   function panelMenu() {
     const body = [];
+    const prevDisabled = !S.project || S.viewer || S.project.maps.findIndex((m) => m.id === S.project.currentMap) <= 0;
+    body.push(h('div', { class: 'menu-list' },
+      S.viewer ? null : btn('路線図を編集', () => { setEdit(!S.edit); closePanel(); toast(S.edit ? '編集モード：駅をタップして名前や所属を変えられます' : '編集を終えました'); }, 'small', { id: 'btn-edit', 'aria-pressed': String(S.edit) }),
+      btn('画像で保存', () => exportImage('png'), 'small', { id: 'btn-save-img' }),
+      S.viewer ? null : btn('別の路線図にする', () => { closePanel(); regen(); }, 'small'),
+      S.viewer ? null : btn('前の図に戻る', () => { closePanel(); prevMap(); }, 'small', { id: 'btn-prev-map', disabled: prevDisabled }),
+      S.viewer && !S.viewer.opts.analysis ? null : btn('振り返り', () => openPanel('analysis'), 'small', { id: 'btn-analysis' }),
+      btn('駅を検索', () => openPanel('search'), 'small'),
+      S.viewer ? null : btn('図の履歴', () => openPanel('history'), 'small')));
     body.push(h('h4', {}, '書き出し'));
     body.push(h('div', { class: 'row' },
       btn('SVG（図）', () => exportImage('svg')),
@@ -1303,7 +1413,6 @@
   }
   function setEdit(on) {
     S.edit = on && !S.viewer;
-    $('#btn-edit').setAttribute('aria-pressed', String(S.edit));
     $('#editbar').hidden = !S.edit;
     if (!S.edit) { S.multi = false; S.multiSel.clear(); $('#btn-multi').setAttribute('aria-pressed', 'false'); }
     if (S.edit && curMap()) $('#btn-fix').setAttribute('aria-pressed', String(!!curMap().fixed));
@@ -1367,6 +1476,7 @@
 
   /* ---------- 起動 ---------- */
   function goHome() {
+    document.documentElement.classList.remove('on-map');
     S.viewer = null; clearHash(); closePanel();
     $('#btn-resume').hidden = !S.project;
     show('start');
@@ -1379,26 +1489,35 @@
     $('#file-reimport').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; reimport(f); });
     $('#btn-sample').addEventListener('click', () => onSample().catch(showError));
     $('#btn-guide').addEventListener('click', showExportGuide);
-    $('#btn-resume').addEventListener('click', () => { S.viewer = null; openMap(); });
+    $('#btn-resume').addEventListener('click', () => {
+      S.viewer = null; openMap();
+      if (S.oldLayoutNote) { S.oldLayoutNote = false; toast('手で動かした配置を残しています。新しい配置にするには「路線図を編集」→「再配置」', 6000); }
+    });
     $('#btn-build').addEventListener('click', () => buildFromImport().catch(showError));
     $('#btn-imp-back').addEventListener('click', goHome);
     $('#btn-cancel').addEventListener('click', () => { if (S.abort) S.abort.abort(); });
     $('#btn-home').addEventListener('click', goHome);
     document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
     $('#btn-regen').addEventListener('click', () => regen());
-    $('#btn-prev-map').addEventListener('click', prevMap);
-    $('#btn-edit').addEventListener('click', () => { setEdit(!S.edit); refreshPanel(); });
     $('#btn-share').addEventListener('click', () => openPanel('share', {}));
-    $('#btn-save-img').addEventListener('click', () => exportImage('png'));
     $('#btn-edit-done').addEventListener('click', () => { setEdit(false); refreshPanel(); });
-    WIDE.addEventListener && WIDE.addEventListener('change', () => { if (!S.panel || S.panel.kind === 'overview') closePanel(); });
+    // カードの引き上げ・引き下げ（ボタンでも開閉できる）
+    $('#btn-grip').addEventListener('click', () => { if (S.panel && S.panel.kind === 'station') setCardExpanded(!S.cardOpen); });
+    let dragY = null;
+    $('#panel-head').addEventListener('pointerdown', (e) => { dragY = e.clientY; });
+    $('#panel-head').addEventListener('pointerup', (e) => {
+      if (dragY == null) return;
+      const dy = e.clientY - dragY; dragY = null;
+      if (!S.panel || Math.abs(dy) < 30) return;
+      if (dy < 0 && S.panel.kind === 'station') setCardExpanded(true);
+      else if (dy > 0) { if (S.cardOpen) setCardExpanded(false); else closePanel(); }
+    });
     $('#btn-copy-own').addEventListener('click', copyToOwn);
-    $('#btn-analysis').addEventListener('click', () => openPanel('analysis'));
     $('#btn-menu').addEventListener('click', () => openPanel('menu'));
     $('#btn-panel-close').addEventListener('click', () => { closePanel(); if (S.search) { S.search = null; renderMap(); } });
     $('#btn-zoom-in').addEventListener('click', () => { const s = stageSize(); zoomAt(1.4, s.w / 2, s.h / 2); });
     $('#btn-zoom-out').addEventListener('click', () => { const s = stageSize(); zoomAt(1 / 1.4, s.w / 2, s.h / 2); });
-    $('#btn-fit').addEventListener('click', () => { S.focus = null; renderMap(true); });
+    $('#btn-fit').addEventListener('click', () => { S.focus = null; renderMap(); fitTo(S.full, true); });
     $('#btn-search').addEventListener('click', () => openPanel('search'));
     $('#btn-undo').addEventListener('click', undo);
     $('#btn-redo').addEventListener('click', redo);
@@ -1443,6 +1562,15 @@
         S.project = p;
         S.project.settings = Object.assign({ shareLimit: 8000, baseUrl: '', shareDates: true, shareAnalysis: false, shareLinks: true }, p.settings || {});
         S.bodies = (await NT.store.get('private', 'bodies')) || {};
+        // 旧い配置（路線ごとに横一列）の図は、手で動かした位置や固定がなければ新しい配置に直す
+        let kept = 0;
+        for (const m of S.project.maps) {
+          if (m.layoutV === LAYOUT_V) continue;
+          if (m.fixed || Object.keys(m.manual || {}).length) { kept++; continue; }
+          relayoutMap(m, true); m.layoutV = LAYOUT_V;
+        }
+        if (kept) S.oldLayoutNote = true;
+        save();
       }
     } catch (e) { /* 端末内保存が使えない環境でも閲覧はできる */ }
     if (/^#map=/.test(location.hash)) { bootHash(); return; }
