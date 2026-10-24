@@ -43,7 +43,8 @@
       body.replaceChildren(content instanceof Node ? content : h('p', {}, content));
       act.replaceChildren(...actions.map((a) => btn(a.label, () => { d.hidden = true; resolve(a.value); }, (a.primary ? 'primary' : '') + (a.danger ? ' danger' : ''))));
       d.hidden = false;
-      const f = act.querySelector('.primary') || act.querySelector('button'); if (f) f.focus();
+      const f = act.querySelector('.primary') || act.querySelector('button'); if (f) f.focus({ preventScroll: true });
+      d.querySelector('.modal-card').scrollTop = 0;
     });
   }
   function showError(e) {
@@ -1345,6 +1346,23 @@
     toast('自分用にコピーしました。「編集」から変更できます（配置は固定中。「図を固定」で解除）', 5000);
   }
 
+  /* ---------- noteからZIPを受け取る手順 ---------- */
+  function showExportGuide() {
+    const step = (n, title, ...body) => h('li', { class: 'guide-step' }, h('b', {}, `${n}. ${title}`), ...body);
+    const img = (k, alt) => h('img', { class: 'guide-img', src: NT.render.assetPath(k), alt });
+    const content = h('div', { class: 'guide' },
+      h('h3', {}, 'noteからZIPを受け取る手順'),
+      h('p', { class: 'meta' }, 'iPhone・iPadのSafariでできます。アプリは不要です。'),
+      h('ol', {},
+        step(1, 'noteにログインして「記事」を開く', h('p', {}, 'Safariで note.com を開き、右上の自分のアイコン →「記事」を選びます。「自分の記事」の一覧が出ます。')),
+        step(2, '「エクスポート」を押す', h('p', {}, '一覧の上にある「エクスポート」を押し、確認が出たらエクスポートを開始します。'), img('guide1', 'noteの記事画面。右上の「エクスポート」ボタンに印')),
+        step(3, 'メールが届くのを待つ', h('p', {}, '準備ができると、noteに登録したメールアドレスにお知らせが届きます。数分〜数時間かかることがあります。届かないときは迷惑メールフォルダも確認してください。')),
+        step(4, 'メールのリンクから「ダウンロード」', h('p', {}, '「エクスポートファイルのダウンロード」画面で「ダウンロード」を押します。ダウンロードは3回まで・期限つきです。'), img('guide2', 'エクスポートファイルのダウンロード画面。「ダウンロード」ボタンに印')),
+        step(5, 'このアプリでZIPを選ぶ', h('p', {}, '保存されたZIPは「ファイル」アプリの「ダウンロード」にあります。展開（解凍）せず、そのまま「noteのZIPを選ぶ」から選んでください。'))),
+      h('div', { class: 'warn' }, 'ZIPには有料記事を含む本文や下書きも入っています。ZIPそのものは人に渡さないでください。このアプリは端末の中だけで読み、共有リンクには公開記事のタイトルとURLなどだけを入れます。'));
+    return dialog(content, [{ label: '閉じる', value: 1, primary: true }]);
+  }
+
   /* ---------- 起動 ---------- */
   function goHome() {
     S.viewer = null; clearHash(); closePanel();
@@ -1358,6 +1376,7 @@
     $('#file-restore2').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; restoreJson(f); });
     $('#file-reimport').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; reimport(f); });
     $('#btn-sample').addEventListener('click', () => onSample().catch(showError));
+    $('#btn-guide').addEventListener('click', showExportGuide);
     $('#btn-resume').addEventListener('click', () => { S.viewer = null; openMap(); });
     $('#btn-build').addEventListener('click', () => buildFromImport().catch(showError));
     $('#btn-imp-back').addEventListener('click', goHome);
