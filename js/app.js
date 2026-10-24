@@ -12,7 +12,7 @@
     edit: false, multi: false, multiSel: new Set(),
     undo: [], redo: [], vb: null, full: null, svg: null,
     rev: 0, geoKey: null, geo: null, model: null,
-    panel: null, imp: null, impKind: null, abort: null, imgCache: new Map(), drag: null,
+    panel: null, imp: null, impKind: null, abort: null, imgCache: new Map(), drag: null, vigUrls: new Map(), vigTried: new Set(),
   };
 
   /* ---------- 小さなDOMヘルパ（文字列は常にテキストノード） ---------- */
@@ -92,7 +92,7 @@
     return {
       project: {
         v: 1, id: U.uid('p'), kind, demo: kind === 'demo',
-        title: kind === 'demo' ? 'デモ：架空の記事路線図' : (siteTitle ? `${siteTitle} の記事路線図` : 'わたしの記事路線図'),
+        title: kind === 'demo' ? 'わたしの記事路線図（デモ）' : 'わたしの記事路線図',
         source: { name: name || '', at: new Date().toISOString() },
         site: res.site || {}, articles, excluded: res.excluded || {}, stats: res.stats || {},
         maps: [], currentMap: null,
@@ -398,7 +398,8 @@
   }
 
   function geometry(model) {
-    const key = S.rev + '|' + model.mode + '|' + (S.viewer ? 'v' : 'o');
+    const vig = vignetteIds(model);
+    const key = S.rev + '|' + model.mode + '|' + (S.viewer ? 'v' : 'o') + '|' + vig.join(',');
     if (S.geoKey === key && S.geo) return S.geo;
     let pos, opts = {};
     if (model.mode === 'time') {
@@ -413,10 +414,30 @@
     }
     // 行（段）は位置から導く（所有者・閲覧者で同じ描画になるように）
     const rows = new Map([...deriveRows(model, pos)].map(([k, y]) => [k, y]));
+    opts.vignettes = vig;
     const geo = NT.layout.geometry(model, pos, rows, opts);
-    // NT.layout.geometry は rows をグリッドの段として扱う
     S.geo = geo; S.geoKey = key;
     return geo;
+  }
+
+  /* 主要駅（乗換駅・終点・始発）の見出し画像候補を小さなカードで添える（本人用・最大4枚・1枚ずつ読み込み） */
+  function vignetteIds(model) {
+    if (S.viewer || model.mode === 'time' || !S.project || S.project.settings.showVignettes === false) return [];
+    const deg = new Map();
+    model.lines.forEach((L) => L.order.forEach((id) => deg.set(id, (deg.get(id) || 0) + 1)));
+    const ends = new Set();
+    model.lines.forEach((L) => { if (L.order.length) { ends.add(L.order[L.order.length - 1]); ends.add(L.order[0]); } });
+    const cands = [...model.stations.keys()].filter((id) => { const a = artById(id); return a && a.images && a.images.length && !a.imageHidden; })
+      .map((id) => ({ id, p: (deg.get(id) >= 2 ? 0 : ends.has(id) ? 1 : 2), d: model.stations.get(id).date || '' }))
+      .filter((c) => c.p < 2).sort((x, y) => x.p - y.p || y.d.localeCompare(x.d)).slice(0, 4).map((c) => c.id);
+    const ready = cands.filter((id) => S.vigUrls.has(id));
+    const todo = cands.filter((id) => !S.vigUrls.has(id) && !S.vigTried.has(id));
+    if (todo.length) {
+      todo.forEach((id) => S.vigTried.add(id));
+      Promise.all(todo.map((id) => loadImage(artById(id)).then((u) => { if (u) S.vigUrls.set(id, u); }).catch(() => {})))
+        .then(() => { if (todo.some((id) => S.vigUrls.has(id))) renderMap(); });
+    }
+    return ready;
   }
 
   function decorHref(k) { return (NT.DECOR_URIS && NT.DECOR_URIS[k]) || `assets/decor/${k}.png`; }
@@ -441,31 +462,48 @@
     if (model.mode !== 'surprise') model.links = [];
     S.model = model;
     $('#map-title').textContent = model.title;
+    $('#site-name').textContent = S.viewer ? '' : ((S.project.site && S.project.site.title) || '');
     document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mode === S.mode)));
     const geo = geometry(model);
     const r = NT.render.svg(model, geo, {
-      title: model.title, subtitle: subtitle(model), interactive: true, selected: S.sel,
-      focusLine: S.focus, highlight: highlightSet(model), decorHref,
+      interactive: true, selected: S.sel,
+      focusLine: S.focus, highlight: highlightSet(model), decorHref, vignetteHref: (id) => S.vigUrls.get(id) || '',
     });
     const host = $('#svg-host');
     host.innerHTML = r.svg; // render.svg はすべての文字列をエスケープ済み
     S.svg = host.firstElementChild;
     S.svg.removeAttribute('width'); S.svg.removeAttribute('height');
     S.full = r.viewBox;
-    if (fit || !S.vb) fitTo(S.full); else applyVB();
     renderChips(model);
+    if (S.panel && S.panel.kind === 'overview') refreshPanel();
+    else if (!S.panel) closePanel();
+    if (fit || !S.vb) fitTo(S.full, true); else applyVB();
     $('#btn-prev-map').disabled = !S.project || S.viewer || S.project.maps.findIndex((m) => m.id === S.project.currentMap) <= 0;
   }
 
+  function legendMark(c) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('width', '36'); svg.setAttribute('height', '16'); svg.setAttribute('aria-hidden', 'true');
+    const ln = document.createElementNS(NS, 'path');
+    ln.setAttribute('d', 'M3 8H33'); ln.setAttribute('stroke', c); ln.setAttribute('stroke-width', '7'); ln.setAttribute('stroke-linecap', 'round');
+    const ci = document.createElementNS(NS, 'circle');
+    ci.setAttribute('cx', '18'); ci.setAttribute('cy', '8'); ci.setAttribute('r', '5'); ci.setAttribute('fill', '#fffdf8'); ci.setAttribute('stroke', c); ci.setAttribute('stroke-width', '3');
+    svg.append(ln, ci);
+    return svg;
+  }
   function renderChips(model) {
     const c = $('#chips');
-    const kids = model.mode === 'time' ? [h('span', { class: 'chip', 'aria-disabled': 'true' }, '色＝話題の路線')] : [];
+    const kids = [];
+    if (model.mode === 'time') kids.push(h('span', { class: 'leg-total' }, '駅の色＝話題の路線'), h('span', { class: 'leg-sep' }));
+    const col = (x) => (/^#[0-9a-f]{6}$/i.test(x) ? x : '#888');
     for (const L of model.lines) {
-      kids.push(h('button', { type: 'button', class: 'chip', 'aria-pressed': String(S.focus === L.id), onclick: () => focusLine(L.id) },
-        h('span', { class: 'dot', style: `background:${/^#[0-9a-f]{6}$/i.test(L.color) ? L.color : '#888'}` }), L.name, h('small', {}, `${L.order.length}駅`)));
+      kids.push(h('button', { type: 'button', class: 'leg', 'aria-pressed': String(S.focus === L.id), onclick: () => focusLine(L.id), 'aria-label': `${L.name}（${L.order.length}駅）を表示` },
+        legendMark(col(L.color)), L.name));
     }
     const iso = [...model.stations.values()].filter((s) => !s.main).length;
-    if (iso && model.mode !== 'time') kids.push(h('span', { class: 'chip', title: '共通語の根拠がない記事は無理につなぎません' }, h('span', { class: 'dot', style: 'background:#fffdf7;border:2px dashed #8c9491' }), 'ひとり駅', h('small', {}, `${iso}駅`)));
+    if (iso && model.mode !== 'time') kids.push(h('span', { class: 'leg', title: '共通語の根拠がない記事は無理につなぎません' }, h('span', { class: 'iso' }), 'ひとり駅', h('small', {}, `${iso}`)));
+    kids.push(h('span', { class: 'leg-sep' }), h('span', { class: 'leg-total' }, `${model.stations.size}記事 ・ ${model.lines.length}路線`));
     c.replaceChildren(...kids);
   }
 
@@ -485,10 +523,22 @@
 
   /* ---------- パン・ピンチ ---------- */
   function stageSize() { const r = $('#stage').getBoundingClientRect(); return { w: Math.max(1, r.width), h: Math.max(1, r.height), left: r.left, top: r.top }; }
-  function fitTo(rect) {
+  // 見出し（上）と凡例（下）が重なる分を除いた領域に収める
+  function insets() {
     const s = stageSize();
-    const k = Math.max(rect.w / s.w, rect.h / s.h) * 1.04;
-    S.vb = { x: rect.x + rect.w / 2 - (s.w * k) / 2, y: rect.y + rect.h / 2 - (s.h * k) / 2, w: s.w * k, h: s.h * k };
+    const top = Math.max(0, ($('#topstack').getBoundingClientRect().bottom || 0) - s.top - 10);
+    const lg = $('#chips').getBoundingClientRect();
+    const bottom = lg.height ? Math.max(0, s.top + s.h - lg.top) + 6 : 0;
+    return { top, bottom };
+  }
+  function fitTo(rect, auto) {
+    const s = stageSize();
+    const ins = insets();
+    const ah = Math.max(80, s.h - ins.top - ins.bottom);
+    const k = Math.max(rect.w / s.w, rect.h / ah) * 1.04;
+    const cy = rect.y + rect.h / 2 - ((ins.top - ins.bottom) / 2) * k;
+    S.vb = { x: rect.x + rect.w / 2 - (s.w * k) / 2, y: cy - (s.h * k) / 2, w: s.w * k, h: s.h * k };
+    S.autoFit = !!auto;
     applyVB();
   }
   function applyVB() {
@@ -502,6 +552,7 @@
     $('#lod-hint').hidden = !(ppu < 0.42);
   }
   function zoomAt(f, cx, cy) {
+    S.autoFit = false;
     const s = stageSize();
     const v = S.vb;
     const ppu = s.w / v.w;
@@ -565,6 +616,7 @@
         if (!S.drag.raf) S.drag.raf = requestAnimationFrame(() => { if (S.drag) S.drag.raf = 0; S.rev++; renderMap(); });
         return;
       }
+      S.autoFit = false;
       S.vb = Object.assign({}, start.vb, { x: start.vb.x - (dx / s.w) * start.vb.w, y: start.vb.y - (dy / s.h) * start.vb.h });
       applyVB();
     });
@@ -605,11 +657,15 @@
       if ($('#screen-map').hidden || !S.vb || !S.lastW) return;
       const s = stageSize();
       if (Math.abs(s.w - S.lastW) < 1 && Math.abs(s.h - S.lastH) < 1) return;
+      if (S.autoFit && S.full) { fitTo(S.full, true); return; }
       const k = S.vb.w / S.lastW, c = { x: S.vb.x + S.vb.w / 2, y: S.vb.y + S.vb.h / 2 };
       S.vb = { x: c.x - (s.w * k) / 2, y: c.y - (s.h * k) / 2, w: s.w * k, h: s.h * k };
       applyVB();
     };
-    if (window.ResizeObserver) new ResizeObserver(onResize).observe(stage); else window.addEventListener('resize', onResize);
+    const topH = () => { document.documentElement.style.setProperty('--top-h', Math.round($('#topstack').getBoundingClientRect().height) + 'px'); };
+    if (window.ResizeObserver) { new ResizeObserver(onResize).observe(stage); new ResizeObserver(() => { topH(); onResize(); }).observe($('#topstack')); }
+    else window.addEventListener('resize', () => { topH(); onResize(); });
+    topH();
   }
 
   function onTap(el) {
@@ -640,12 +696,17 @@
   }
 
   /* ---------- パネル ---------- */
+  const WIDE = window.matchMedia('(min-width: 900px) and (orientation: landscape), (min-width: 1100px)');
   function openPanel(kind, arg) { S.panel = { kind, arg }; $('#panel').hidden = false; refreshPanel(); }
-  function closePanel() { S.panel = null; $('#panel').hidden = true; }
+  // 広い画面では「選択中の記事」カードを常に出しておく（何も選んでいない時は案内）
+  function closePanel() {
+    if (WIDE.matches && !$('#screen-map').hidden && S.model) { S.panel = { kind: 'overview' }; $('#panel').hidden = false; refreshPanel(); return; }
+    S.panel = null; $('#panel').hidden = true;
+  }
   function refreshPanel() {
     if (!S.panel) return;
     const { kind, arg } = S.panel;
-    const fn = { station: panelStation, line: panelLine, multi: panelMulti, share: panelShare, analysis: panelAnalysis, menu: panelMenu, history: panelHistory, search: panelSearch, surprise: panelSurprise }[kind];
+    const fn = { overview: panelOverview, station: panelStation, line: panelLine, multi: panelMulti, share: panelShare, analysis: panelAnalysis, menu: panelMenu, history: panelHistory, search: panelSearch, surprise: panelSurprise }[kind];
     if (!fn) return;
     const r = fn(arg);
     if (!r) { closePanel(); return; }
@@ -654,7 +715,35 @@
   }
 
   function lineChip(L, extra) {
-    return h('button', { type: 'button', class: 'chip', onclick: () => focusLine(L.id) }, h('span', { class: 'dot', style: `background:${L.color}` }), L.name, extra ? h('small', {}, extra) : null);
+    return h('button', { type: 'button', class: 'pill', style: `background:${L.color}`, onclick: () => focusLine(L.id) }, L.name, extra ? h('small', {}, extra) : null);
+  }
+  const ART = ['station', 'train', 'bridge', 'town', 'trees', 'clouds'];
+  const artFor = (id) => ART[U.hash(String(id)) % ART.length];
+  const cardFoot = () => h('p', { class: 'card-foot' }, h('span', { 'aria-hidden': 'true' }, 'ⓘ'), '駅をタップすると、記事が開きます。');
+
+  function panelOverview() {
+    const model = S.model;
+    if (!model) return null;
+    const inter = new Map();
+    model.lines.forEach((L) => L.order.forEach((id) => inter.set(id, (inter.get(id) || 0) + 1)));
+    const nInter = [...inter.values()].filter((n) => n >= 2).length;
+    const modeText = {
+      topic: '共通の言葉でつながる記事を、同じ路線に並べています。駅は日付順です。',
+      time: '投稿した順に一本の線でたどります。駅の色は話題の路線です。',
+      surprise: '主路線がちがうのに、めずらしい共通語でつながる記事を点線で結んでいます。',
+    }[model.mode];
+    return { title: '選択中の記事', body: [
+      h('div', { class: 'art decor' }, h('img', { src: decorHref('station'), alt: '' })),
+      h('p', { class: 'card-name' }, '駅を選んでください'),
+      h('p', { class: 'card-title' }, modeText),
+      h('div', { class: 'pills' }, model.lines.map((L) => lineChip(L, `${L.order.length}`))),
+      h('hr', { class: 'card-sep' }),
+      h('div', { class: 'stat-grid' },
+        h('div', { class: 'stat' }, h('b', {}, model.stations.size), h('span', {}, '記事')),
+        h('div', { class: 'stat' }, h('b', {}, model.lines.length), h('span', {}, '路線')),
+        h('div', { class: 'stat' }, h('b', {}, nInter), h('span', {}, '乗換駅'))),
+      cardFoot(),
+    ] };
   }
 
   function sharedReason(a, b) {
@@ -671,19 +760,26 @@
     if (!s) return null;
     const a = S.viewer ? null : artById(id);
     const body = [];
-    body.push(h('p', { class: 'st-name' }, s.short));
-    body.push(h('p', { class: 'st-title' }, s.title));
-    body.push(h('p', { class: 'meta' }, s.date ? '公開日：' + U.fmtDate(s.date) : (S.viewer && !S.viewer.opts.dates ? '公開日：共有されていません' : '公開日：不明')));
-    if (a && a.warnings && a.warnings.length) body.push(h('p', { class: 'warn' }, '注意：' + a.warnings.join('・')));
+    const lines = model.lines.filter((L) => L.order.includes(id));
+    // 画像：見出し画像候補（本人用）があればそれを、なければ装飾の水彩
+    const art = h('div', { class: 'art decor' }, h('img', { src: decorHref(artFor(id)), alt: '' }));
+    if (a && a.images && a.images.length && !a.imageHidden) {
+      loadImage(a).then((url) => { if (url) { art.className = 'art'; art.replaceChildren(h('img', { src: url, alt: '見出し画像候補' }), h('span', { class: 'art-note' }, '見出し画像候補（本人だけに表示）')); } });
+    }
+    body.push(art);
+    body.push(h('p', { class: 'card-name' }, s.short));
+    body.push(h('p', { class: 'card-title' }, s.title));
+    if (lines.length) body.push(h('div', { class: 'pills' }, lines.map((L) => lineChip(L, lines.length > 1 ? (L.id === s.main ? '主' : '副') : ''))));
+    else body.push(h('p', { class: 'reason' }, 'ひとり駅：他の記事と共有する特徴語が見つからなかったため、無理につないでいません。'));
+    body.push(h('hr', { class: 'card-sep' }));
     if (s.url) {
       const demo = s.url.startsWith(NT.demo.BASE);
-      body.push(h('div', { class: 'row' }, h('a', { class: 'btn primary', href: s.url, target: '_blank', rel: 'noopener noreferrer' }, demo ? '記事を開く（架空のURL）' : 'noteで読む ↗')));
-    } else body.push(h('p', { class: 'meta' }, '元記事のURLがないため、リンクを表示できません。'));
-
-    const lines = model.lines.filter((L) => L.order.includes(id));
-    body.push(h('h4', {}, '所属路線'));
-    if (lines.length) body.push(h('div', { class: 'row' }, lines.map((L) => lineChip(L, L.id === s.main ? '主' : '副'))));
-    else body.push(h('p', { class: 'reason' }, 'ひとり駅：他の記事と共有する特徴語が見つからなかったため、無理につないでいません。'));
+      body.push(h('a', { class: 'btn read-btn', href: s.url, target: '_blank', rel: 'noopener noreferrer' }, demo ? '記事を開く（架空のURL）' : 'noteでこの記事を読む', h('span', { 'aria-hidden': 'true' }, '↗')));
+    } else body.push(h('span', { class: 'read-btn disabled' }, '元記事のURLがありません'));
+    body.push(cardFoot());
+    body.push(h('h4', {}, 'この駅について'));
+    body.push(h('p', { class: 'meta' }, s.date ? '公開日：' + U.fmtDate(s.date) : (S.viewer && !S.viewer.opts.dates ? '公開日：共有されていません' : '公開日：不明')));
+    if (a && a.warnings && a.warnings.length) body.push(h('p', { class: 'warn' }, '注意：' + a.warnings.join('・')));
 
     // 接点の理由（実際の共通語だけ）
     for (const L of lines) {
@@ -718,21 +814,13 @@
     // 見出し画像候補（本人用）
     if (a && a.images && a.images.length) {
       body.push(h('h4', {}, '見出し画像候補'));
-      if (a.imageHidden) body.push(h('p', { class: 'meta' }, '非表示にしています。'));
-      else {
-        const holder = h('div', {}, h('p', { class: 'meta' }, '読み込み中…'));
-        body.push(holder);
-        loadImage(a).then((url) => {
-          holder.replaceChildren(url ? h('img', { class: 'thumb', src: url, alt: '見出し画像候補' }) : h('p', { class: 'meta' }, 'ZIPを選び直すと表示できます（画像は端末内にだけあります）。'),
-            h('p', { class: 'meta' }, `本文の${a.imageChoice % a.images.length + 1}番目の画像（全${a.images.length}枚）。正式な見出し画像とは限りません。共有には含めません。`));
-        });
-      }
+      body.push(h('p', { class: 'meta' }, a.imageHidden ? '非表示にしています。' : `本文の${a.imageChoice % a.images.length + 1}番目の画像（全${a.images.length}枚）。正式な見出し画像とは限りません。端末内だけで表示し、共有・書き出しには含めません。ZIPを読み込んでいない時は、以前表示した縮小画像だけが出ます。`));
       body.push(h('div', { class: 'row' },
-        a.images.length > 1 && !a.imageHidden ? btn('別の候補', () => { a.imageChoice = (a.imageChoice + 1) % a.images.length; save(); refreshPanel(); }) : null,
-        btn(a.imageHidden ? '表示する' : '非表示にする', () => { a.imageHidden = !a.imageHidden; save(); refreshPanel(); })));
+        a.images.length > 1 && !a.imageHidden ? btn('別の候補', () => { a.imageChoice = (a.imageChoice + 1) % a.images.length; S.vigUrls.delete(a.id); S.vigTried.delete(a.id); save(); renderMap(); refreshPanel(); }) : null,
+        btn(a.imageHidden ? '表示する' : '非表示にする', () => { a.imageHidden = !a.imageHidden; save(); renderMap(); refreshPanel(); })));
     }
     if (S.edit && a) body.push(editStation(a, s));
-    return { title: '駅', body };
+    return { title: '選択中の記事', body };
   }
 
   function editStation(a, s) {
@@ -1076,6 +1164,9 @@
     const base = h('input', { type: 'url', value: S.project.settings.baseUrl || '', placeholder: isPermanentHere() ? location.origin + location.pathname + '（自動）' : 'https://…' });
     base.addEventListener('change', () => { const u = U.safeUrl(base.value); if (base.value && !u) return toast('https のURLを入力してください'); S.project.settings.baseUrl = u ? u.split('#')[0] : ''; save(); });
     body.push(h('label', { class: 'field' }, h('span', {}, '公開URL（共有リンクの先頭。空欄なら今のURL）'), base));
+    const vig = h('input', { type: 'checkbox', checked: S.project.settings.showVignettes !== false });
+    vig.addEventListener('change', () => { S.project.settings.showVignettes = vig.checked; save(); renderMap(); });
+    body.push(h('label', { class: 'check' }, vig, '主要駅のそばに見出し画像候補を小さく表示する（本人の画面だけ。共有・書き出しには入りません）'));
     body.push(h('h4', {}, 'リセット'));
     body.push(h('div', { class: 'row' }, btn('端末内のデータをすべて消す', resetAll, 'small danger')));
     body.push(about());
@@ -1100,7 +1191,7 @@
     try {
       const model = modelFor(S.mode); if (model.mode !== 'surprise') model.links = [];
       const geo = geometry(model);
-      const opts = { title: model.title, subtitle: subtitle(model) };
+      const opts = { title: model.title, subtitle: '書いてきたことが、つながって見える。' };
       const base = (model.title || 'note-transit').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40);
       if (kind === 'svg') {
         const blob = await NT.exporter.toSvgBlob(model, geo, opts);
@@ -1177,7 +1268,7 @@
     if (!blob) return null;
     const url = URL.createObjectURL(blob);
     S.imgCache.set(key, url);
-    if (S.imgCache.size > 12) { const [k0, u0] = S.imgCache.entries().next().value; URL.revokeObjectURL(u0); S.imgCache.delete(k0); }
+    if (S.imgCache.size > 40) { const [k0, u0] = S.imgCache.entries().next().value; URL.revokeObjectURL(u0); S.imgCache.delete(k0); }
     return url;
   }
   async function thumbnail(blob) {
@@ -1277,6 +1368,9 @@
     $('#btn-prev-map').addEventListener('click', prevMap);
     $('#btn-edit').addEventListener('click', () => { setEdit(!S.edit); refreshPanel(); });
     $('#btn-share').addEventListener('click', () => openPanel('share', {}));
+    $('#btn-save-img').addEventListener('click', () => exportImage('png'));
+    $('#btn-edit-done').addEventListener('click', () => { setEdit(false); refreshPanel(); });
+    WIDE.addEventListener && WIDE.addEventListener('change', () => { if (!S.panel || S.panel.kind === 'overview') closePanel(); });
     $('#btn-copy-own').addEventListener('click', copyToOwn);
     $('#btn-analysis').addEventListener('click', () => openPanel('analysis'));
     $('#btn-menu').addEventListener('click', () => openPanel('menu'));

@@ -5,8 +5,8 @@
   'use strict';
   const U = NT.util;
 
-  const FS = 14;          // 駅名フォントサイズ
-  const H = 150;          // 段の間隔(px)
+  const FS = 17;          // 駅名フォントサイズ
+  const H = 190;          // 段の間隔(px)
 
   /* ---------- 話題モード ---------- */
   // lines: [{id, order:[sid]}], st: Map sid→{main, sub}
@@ -169,8 +169,8 @@
     const out = new Map();
     const order = items.slice().sort((a, b) => a.pri - b.pri || a.x - b.x);
     for (const it of order) {
-      const w = U.measure(it.text, FS, 600) + 4, h = FS + 4;
-      const g = it.r + 5;
+      const w = U.measure(it.text, FS, 700) + 4, h = FS + 5;
+      const g = it.r + 6;
       const C = [
         ['s', it.x - w / 2, it.y + g, 0], ['n', it.x - w / 2, it.y - g - h, 0.05],
         ['se', it.x + g * 0.6, it.y + g * 0.6, 0.25], ['ne', it.x + g * 0.6, it.y - g * 0.6 - h, 0.25],
@@ -194,47 +194,83 @@
     return out;
   }
 
-  /* ---------- 装飾の配置（空き領域・タッチを奪わない） ---------- */
-  const DECOR = { trees: [280, 209], town: [280, 184], bridge: [280, 235], station: [280, 223], clouds: [280, 210], train: [280, 220] };
-  function placeDecor(bounds, boxes, segs, seed) {
-    const cell = 40;
-    const pad = 170;
+  /* ---------- 空き領域グリッド（装飾・画像カードの配置用） ---------- */
+  function occupancy(bounds, boxes, segs, pad) {
+    const cell = 30;
     const bx = bounds.x - pad, by = bounds.y - pad, bw = bounds.w + pad * 2, bh = bounds.h + pad * 2;
     const cols = Math.ceil(bw / cell), rows = Math.ceil(bh / cell);
-    if (cols * rows > 400000) return [];
+    if (cols * rows > 600000) return null;
     const occ = new Uint8Array(cols * rows);
     const mark = (x, y, w, h) => {
       const c0 = Math.max(0, Math.floor((x - bx) / cell)), c1 = Math.min(cols - 1, Math.floor((x + w - bx) / cell));
       const r0 = Math.max(0, Math.floor((y - by) / cell)), r1 = Math.min(rows - 1, Math.floor((y + h - by) / cell));
       for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) occ[r * cols + c] = 1;
     };
-    boxes.forEach((b) => mark(b.x - 14, b.y - 14, b.w + 28, b.h + 28));
-    for (const s of segs) {
-      const L = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y), n = Math.max(1, Math.ceil(L / 20));
-      for (let i = 0; i <= n; i++) { const x = s.a.x + (s.b.x - s.a.x) * i / n, y = s.a.y + (s.b.y - s.a.y) * i / n; mark(x - 22, y - 22, 44, 44); }
-    }
-    const rand = U.rng(seed * 31 + 5);
-    const keys = Object.keys(DECOR).sort(() => rand() - 0.5);
-    const area = bounds.w * bounds.h;
-    const want = U.clamp(Math.round(area / 260000) + 2, 2, 6);
-    const out = [];
-    const free = (c, r, cw, ch) => {
-      if (c < 0 || r < 0 || c + cw > cols || r + ch > rows) return false;
-      for (let y = r; y < r + ch; y++) for (let x = c; x < c + cw; x++) if (occ[y * cols + x]) return false;
+    const isFree = (x, y, w, h) => {
+      const c0 = Math.floor((x - bx) / cell), c1 = Math.floor((x + w - bx) / cell);
+      const r0 = Math.floor((y - by) / cell), r1 = Math.floor((y + h - by) / cell);
+      if (c0 < 0 || r0 < 0 || c1 >= cols || r1 >= rows) return false;
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) if (occ[r * cols + c]) return false;
       return true;
     };
-    for (const scale of [0.9, 0.7, 0.55]) {
-      for (const k of keys) {
-        if (out.length >= want || out.some((o) => o.key === k)) continue;
-        const w = DECOR[k][0] * scale, h = DECOR[k][1] * scale;
-        const cw = Math.ceil(w / cell), ch = Math.ceil(h / cell);
-        const spots = [];
-        for (let r = 0; r + ch <= rows; r += 1) for (let c = 0; c + cw <= cols; c += 1) if (free(c, r, cw, ch)) spots.push([c, r]);
-        if (!spots.length) continue;
-        const [c, r] = spots[Math.floor(rand() * spots.length)];
-        const x = bx + c * cell, y = by + r * cell;
-        out.push({ key: k, x, y, w, h });
-        mark(x - 30, y - 30, w + 60, h + 60);
+    boxes.forEach((b) => mark(b.x - 12, b.y - 12, b.w + 24, b.h + 24));
+    for (const s of segs) {
+      const L = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y), n = Math.max(1, Math.ceil(L / 15));
+      for (let i = 0; i <= n; i++) { const x = s.a.x + (s.b.x - s.a.x) * i / n, y = s.a.y + (s.b.y - s.a.y) * i / n; mark(x - 22, y - 22, 44, 44); }
+    }
+    return { cell, bx, by, cols, rows, mark, isFree };
+  }
+
+  /* ---------- 装飾の配置（空き領域に薄く・タッチを奪わない。記事の意味は持たない） ---------- */
+  const DECOR = { trees: [280, 209], town: [280, 184], bridge: [280, 235], station: [280, 223], clouds: [280, 210], train: [280, 220] };
+  function placeDecor(G, bounds, seed) {
+    if (!G) return [];
+    const rand = U.rng(seed * 31 + 5);
+    const out = [];
+    const spotsFor = (w, h) => {
+      const spots = [];
+      const step = G.cell;
+      for (let y = G.by; y + h < G.by + G.rows * G.cell; y += step) for (let x = G.bx; x + w < G.bx + G.cols * G.cell; x += step) if (G.isFree(x, y, w, h)) spots.push([x, y]);
+      return spots;
+    };
+    const put = (key, scale, opacity, gap) => {
+      const w = DECOR[key][0] * scale, h = DECOR[key][1] * scale;
+      const spots = spotsFor(w, h);
+      if (!spots.length) return false;
+      const [x, y] = spots[Math.floor(rand() * spots.length)];
+      out.push({ key, x, y, w, h, opacity });
+      G.mark(x - gap, y - gap, w + gap * 2, h + gap * 2);
+      return true;
+    };
+    const area = bounds.w * bounds.h;
+    // 大きな装飾（街・橋・駅舎・列車・雲）
+    const big = ['town', 'bridge', 'station', 'train', 'clouds'].sort(() => rand() - 0.5);
+    const wantBig = U.clamp(Math.round(area / 300000) + 2, 2, 8);
+    let nb = 0;
+    for (const scale of [0.95, 0.75, 0.6]) for (const k of big) { if (nb >= wantBig || out.some((o) => o.key === k && o.w > 150)) continue; if (put(k, scale, 0.36, 40)) nb++; }
+    // 小さな木立・雲を散らす（風景の地）
+    const wantSmall = U.clamp(Math.round(area / 70000), 4, 40);
+    for (let i = 0; i < wantSmall; i++) {
+      const k = rand() < 0.82 ? 'trees' : 'clouds';
+      put(k, 0.28 + rand() * 0.16, k === 'trees' ? 0.4 : 0.32, 18);
+    }
+    return out;
+  }
+
+  /* ---------- 主要駅の画像カード（本人用・少数だけ） ---------- */
+  function placeVignettes(G, stations, ids) {
+    const out = [];
+    if (!G) return out;
+    const W = 156, Hh = 108;
+    for (const id of ids) {
+      const s = stations.find((x) => x.id === id);
+      if (!s) continue;
+      const C = [];
+      for (const dy of [-Hh - 52, 52, -Hh - 90, 90, -Hh - 130, 130]) for (const dx of [-W / 2, -W - 10, 10, -W - 70, 70]) C.push([dx, dy]);
+      C.sort((p, q) => Math.hypot(p[0] + W / 2, p[1] + Hh / 2) - Math.hypot(q[0] + W / 2, q[1] + Hh / 2));
+      for (const [dx, dy] of C) {
+        const x = s.x + dx, y = s.y + dy;
+        if (G.isFree(x, y, W, Hh)) { out.push({ id, x, y, w: W, h: Hh }); G.mark(x - 10, y - 10, W + 20, Hh + 20); break; }
       }
     }
     return out;
@@ -242,17 +278,18 @@
 
   /* ---------- 全体：描画用ジオメトリ ---------- */
   // model: { mode, lines:[{id,name,color,order}], stations: Map, links, seed }
-  // pos: Map sid→{x,y}（グリッド）, rows: Map lineId→row
+  // pos: Map sid→{x,y}（グリッド）, rows: Map lineId→段（グリッド）
+  // opts: { order, per（時間モード）, decor, vignettes:[id], planned:boolean }
   function geometry(model, pos, rows, opts) {
     opts = opts || {};
     const st = model.stations;
-    const names = [...st.values()].map((s) => U.measure(s.short || '', FS, 600));
+    const names = [...st.values()].map((s) => U.measure(s.short || '', FS, 700));
     names.sort((a, b) => a - b);
     const med = names.length ? names[Math.floor(names.length / 2)] : 80;
-    const S = model.mode === 'time' ? U.clamp(med * 0.9 + 46, 110, 170) : U.clamp(med * 0.75 + 46, 110, 160);
-    const HH = model.mode === 'time' ? H * 1.05 : H;
+    const S = model.mode === 'time' ? U.clamp(med * 0.7 + 56, 130, 200) : U.clamp(med * 0.58 + 58, 125, 190);
+    const HH = model.mode === 'time' ? H * 1.0 : H;
     const P = (id) => { const p = pos.get(id); return { x: p.x * S, y: p.y * HH }; };
-    const geo = { S, H: HH, lines: [], stations: [], links: [], labels: null, badges: [], months: [] };
+    const geo = { S, H: HH, lines: [], stations: [], links: [], labels: null, badges: [], months: [], planned: null, vignettes: [] };
     const segs = [];
     const deg = new Map();
     const lineOf = new Map();
@@ -267,41 +304,51 @@
         if (i > 0 && i % per === 0) {
           const q = P(order[i - 1]);
           const dir = Math.floor((i - 1) / per) % 2 ? -1 : 1;
-          const ex = q.x + dir * S * 0.55;
+          const ex = q.x + dir * S * 0.6;
           pts.push({ x: ex, y: q.y }, { x: ex, y: p.y });
         }
         pts.push(p);
       });
       const ppts = dedupe(pts);
-      geo.lines.push({ id: 'time', color: '#3b3a36', d: roundedPath(ppts, HH * 0.45), width: 7, pts: ppts });
+      geo.lines.push({ id: 'time', color: '#3b3a36', d: roundedPath(ppts, HH * 0.45), width: 11, pts: ppts });
       for (let i = 1; i < ppts.length; i++) segs.push({ a: ppts[i - 1], b: ppts[i] });
       let lastM = null;
       order.forEach((id) => {
         const s = st.get(id), m = s.date ? s.date.slice(0, 7) : 'unknown';
-        if (m !== lastM) { const p = P(id); geo.months.push({ x: p.x, y: p.y - 34, text: m === 'unknown' ? '日付不明' : U.fmtMonth(m), id }); lastM = m; }
+        if (m !== lastM) { const p = P(id); geo.months.push({ x: p.x, y: p.y - 44, text: m === 'unknown' ? '日付不明' : U.fmtMonth(m), id }); lastM = m; }
       });
     } else {
+      // 延伸予定：最も新しい記事を含む路線の終点に点線を足す（記事ではない遊びの表示）
+      let newest = null;
+      if (opts.planned !== false) {
+        let best = '';
+        for (const L of model.lines) { const z = L.order[L.order.length - 1]; const d = z && st.get(z) && st.get(z).date; if (d && d > best) { best = d; newest = L.id; } }
+      }
       model.lines.forEach((L, li) => {
         const ids = L.order.filter((id) => pos.has(id));
         if (!ids.length) return;
         const yc = (rows.get(L.id) || 0) * HH;
-        const off = ((li % 4) - 1.5) * 5;
+        const off = ((li % 4) - 1.5) * 6;
         let pts = [P(ids[0])];
         for (let i = 1; i < ids.length; i++) pts = pts.concat(monotone([pts[pts.length - 1], ...jog(P(ids[i - 1]), P(ids[i]), yc, off)]).slice(1));
-        // 路線の両端に少し延長（駅が端でも線として見えるように）
         const a = pts[0], z = pts[pts.length - 1];
-        const lead = { x: a.x - S * 0.35, y: a.y }, tail = { x: z.x + S * 0.35, y: z.y };
+        const lead = { x: a.x - S * 0.42, y: a.y }, tail = { x: z.x + S * 0.3, y: z.y };
         const all = dedupe([lead, ...pts, tail]);
-        geo.lines.push({ id: L.id, color: L.color, d: roundedPath(all, 22), width: 7, pts: all });
+        geo.lines.push({ id: L.id, color: L.color, d: roundedPath(all, 46), width: 11, pts: all });
         for (let i = 1; i < all.length; i++) segs.push({ a: all[i - 1], b: all[i], line: L.id });
         geo.badges.push({ id: L.id, x: lead.x, y: lead.y, name: L.name, color: L.color });
+        if (L.id === newest) {
+          const q = { x: z.x + S * 1.15, y: z.y };
+          geo.planned = { line: L.id, from: tail, x: q.x, y: q.y, color: L.color };
+          segs.push({ a: tail, b: q, line: L.id });
+        }
       });
     }
     // 意外な乗換（連絡通路）
     for (const k of model.links || []) {
       if (!pos.has(k.a) || !pos.has(k.b)) continue;
       const a = P(k.a), b = P(k.b);
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - Math.min(120, Math.abs(b.x - a.x) * 0.25 + 30);
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - Math.min(140, Math.abs(b.x - a.x) * 0.25 + 40);
       geo.links.push({ a: k.a, b: k.b, term: k.term, d: `M${a.x} ${a.y} Q${mx} ${my} ${b.x} ${b.y}` });
     }
     // 駅
@@ -311,11 +358,12 @@
       const p = P(s.id);
       const inter = (deg.get(s.id) || 0) >= 2;
       const isolated = model.mode !== 'time' && !s.main;
-      const r = inter ? 10 : 7.5;
+      const r = inter ? 15 : 11;
       const L = model.lines.find((x) => x.id === s.main);
       geo.stations.push({ id: s.id, x: p.x, y: p.y, r, inter, isolated, color: model.mode === 'time' ? (s.topicColor || '#3b3a36') : (L ? L.color : '#8c9491'), lines: lineOf.get(s.id) || [] });
-      circles.push({ id: s.id, x: p.x, y: p.y, r: r + 2 });
+      circles.push({ id: s.id, x: p.x, y: p.y, r: r + 3 });
     }
+    if (geo.planned) circles.push({ id: '__planned', x: geo.planned.x, y: geo.planned.y, r: 16 });
     // 文字
     const first = new Set(), last = new Set();
     model.lines.forEach((L) => { if (L.order.length) { first.add(L.order[0]); last.add(L.order[L.order.length - 1]); } });
@@ -331,19 +379,30 @@
     // 範囲
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     const grow = (x, y, w, h) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + (w || 0)); y1 = Math.max(y1, y + (h || 0)); };
-    geo.stations.forEach((s) => grow(s.x - 20, s.y - 20, 40, 40));
+    geo.stations.forEach((s) => grow(s.x - 24, s.y - 24, 48, 48));
     geo.labels.forEach((l) => grow(l.x - 2, l.y - FS, l.w, l.h));
-    geo.lines.forEach((l) => l.pts.forEach((p) => grow(p.x - 6, p.y - 6, 12, 12)));
-    geo.badges.forEach((b) => { const w = U.measure(b.name, 15, 700) + 24; b.w = w; grow(b.x - w - 8, b.y - 16, w + 8, 32); });
-    geo.months.forEach((m) => grow(m.x - 40, m.y - 18, 80, 24));
+    geo.lines.forEach((l) => l.pts.forEach((p) => grow(p.x - 8, p.y - 8, 16, 16)));
+    geo.badges.forEach((b) => { const w = U.measure(b.name, 19, 800) + 34; b.w = w; grow(b.x - w - 6, b.y - 20, w + 6, 40); });
+    geo.months.forEach((m) => grow(m.x - 44, m.y - 18, 88, 26));
+    let pBox = null;
+    if (geo.planned) {
+      const p = geo.planned;
+      p.label = '次につくるもの'; p.sub = '延伸予定';
+      const w = U.measure(p.label, 15, 700) + 4;
+      pBox = { x: p.x - w / 2, y: p.y + 22, w, h: 40 };
+      grow(pBox.x, pBox.y, pBox.w, pBox.h); grow(p.x - 20, p.y - 20, 40, 40);
+    }
     if (!isFinite(x0)) { x0 = 0; y0 = 0; x1 = 400; y1 = 300; }
     geo.bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-    const title = { x: geo.bounds.x - 60, y: geo.bounds.y - 175, w: 560, h: 120 };
-    const boxes = [title].concat([...geo.labels.values()].map((l) => ({ x: l.x, y: l.y - FS, w: l.w, h: l.h }))
-      .concat(geo.stations.map((s) => ({ x: s.x - 16, y: s.y - 16, w: 32, h: 32 })))
-      .concat(geo.badges.map((b) => ({ x: b.x - b.w - 8, y: b.y - 16, w: b.w + 8, h: 32 })))
-      .concat(geo.months.map((m) => ({ x: m.x - 40, y: m.y - 18, w: 80, h: 24 }))));
-    geo.decor = opts.decor === false ? [] : placeDecor(geo.bounds, boxes, segs, model.seed || 1);
+    const boxes = [...geo.labels.values()].map((l) => ({ x: l.x, y: l.y - FS, w: l.w, h: l.h }))
+      .concat(geo.stations.map((s) => ({ x: s.x - 20, y: s.y - 20, w: 40, h: 40 })))
+      .concat(geo.badges.map((b) => ({ x: b.x - b.w - 6, y: b.y - 20, w: b.w + 6, h: 40 })))
+      .concat(geo.months.map((m) => ({ x: m.x - 44, y: m.y - 18, w: 88, h: 26 })))
+      .concat(pBox ? [pBox] : []);
+    if (opts.titleBox) boxes.push({ x: geo.bounds.x - 60, y: geo.bounds.y - 175, w: 560, h: 120 });
+    const G = occupancy(geo.bounds, boxes, segs, 190);
+    geo.vignettes = placeVignettes(G, geo.stations, opts.vignettes || []);
+    geo.decor = opts.decor === false ? [] : placeDecor(G, geo.bounds, model.seed || 1);
     geo.segs = segs;
     geo.FS = FS;
     return geo;

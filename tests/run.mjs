@@ -336,11 +336,12 @@ await test('共有データ・SVG・HTML・PNGに下書き・本文・非表示�
     hiddenA.hidden = false; S.rev++; S.F = null;
     // アプリのJSソース（デモ用の架空文を含む）を除き、埋め込みデータとマークアップを検査
     const htmlData = html.replace(/<script>[\s\S]*?<\/script>/g, '');
-    return { json: leaks(json), svg: leaks(svg), html: leaks(htmlData), embedded: htmlData.includes('nt-embedded'), png: png.blob.size, pngType: png.blob.type, htmlSize: html.length, htmlScripts: (html.match(/<script[^>]*src=/g) || []).length };
+    return { svgBlob: /href="blob:/.test(svg), json: leaks(json), svg: leaks(svg), html: leaks(htmlData), embedded: htmlData.includes('nt-embedded'), png: png.blob.size, pngType: png.blob.type, htmlSize: html.length, htmlScripts: (html.match(/<script[^>]*src=/g) || []).length };
   });
   for (const k of ['json', 'svg', 'html']) for (const [kk, v] of Object.entries(r[k])) assert(!v, `${k} leaks ${kk}`);
   assert(r.png > 10000 && r.pngType === 'image/png', 'png ' + r.png);
   assert(r.htmlScripts === 0, 'HTML is self-contained');
+  assert(!r.svgBlob, 'local images (blob:) must not be exported');
   assert(r.embedded, 'embedded data checked');
   return `PNG ${Math.round(r.png / 1024)}KB / HTML ${Math.round(r.htmlSize / 1024)}KB 自己完結`;
 });
