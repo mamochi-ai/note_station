@@ -440,7 +440,7 @@
     return ready;
   }
 
-  function decorHref(k) { return (NT.DECOR_URIS && NT.DECOR_URIS[k]) || `assets/decor/${k}.png`; }
+  const decorHref = (k) => NT.render.assetPath(k);
 
   function subtitle(model) {
     const dates = [...model.stations.values()].map((s) => s.date).filter(Boolean).sort();
@@ -467,7 +467,7 @@
     const geo = geometry(model);
     const r = NT.render.svg(model, geo, {
       interactive: true, selected: S.sel,
-      focusLine: S.focus, highlight: highlightSet(model), decorHref, vignetteHref: (id) => S.vigUrls.get(id) || '',
+      focusLine: S.focus, highlight: highlightSet(model), transparentBg: true, vignetteHref: (id) => S.vigUrls.get(id) || '',
     });
     const host = $('#svg-host');
     host.innerHTML = r.svg; // render.svg はすべての文字列をエスケープ済み
@@ -1408,6 +1408,8 @@
 
   async function boot() {
     bind();
+    // 地図の背景：水彩の風景を画面いっぱいに敷き、その上で路線図を動かす
+    $('#stage').style.backgroundImage = `url("${NT.render.assetPath('bg')}")`;
     // 閲覧用HTMLに埋め込まれた共有データ
     const emb = document.getElementById('nt-embedded');
     if (emb) {

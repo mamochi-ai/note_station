@@ -1,5 +1,5 @@
 :root {
-  --bg: #fbf6ea;
+  --bg: #fcf8f0;
   --paper: #fffdf7;
   --ink: #2f2b26;
   --sub: #6f675b;
@@ -46,7 +46,7 @@ p.fineprint { padding-left: 0; }
 
 /* 地図画面 */
 #screen-map { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
-.topstack { position: absolute; left: 0; right: 0; top: 0; z-index: 3; pointer-events: none; background: linear-gradient(rgba(248, 243, 232, .94) 0%, rgba(248, 243, 232, .82) 70%, rgba(248, 243, 232, 0) 100%); padding-bottom: 14px; }
+.topstack { position: absolute; left: 0; right: 0; top: 0; z-index: 3; pointer-events: none; background: linear-gradient(rgba(252, 248, 240, .9) 0%, rgba(252, 248, 240, .72) 70%, rgba(252, 248, 240, 0) 100%); padding-bottom: 14px; }
 .topstack > * { pointer-events: none; }
 .topstack button, .topstack .seg, .topstack .editbar, .topstack .tb-right { pointer-events: auto; }
 .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: calc(16px + var(--safe-t)) 28px 4px; z-index: 3; }
@@ -73,7 +73,7 @@ p.fineprint { padding-left: 0; }
 .editbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 28px 6px; padding: 8px 10px; background: #efe5cf; border-radius: 12px; }
 .editbar .hint { font-size: 12px; color: var(--sub); }
 .main { position: absolute; inset: 0; display: flex; }
-.stage { position: relative; flex: 1; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; background: var(--bg); }
+.stage { position: relative; flex: 1; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; background-color: var(--bg); background-size: cover; background-position: center 30%; background-repeat: no-repeat; }
 #svg-host, #svg-host svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .nt-st { cursor: pointer; }
 .nt-st:focus { outline: none; }

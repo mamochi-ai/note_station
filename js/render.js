@@ -5,10 +5,10 @@
   const U = NT.util;
   const E = U.esc;
 
-  const C = { bg: '#f8f3e8', ink: '#24211d', sub: '#6f675b', paper: '#fffdf8', soft: '#ece3cf' };
+  const C = { bg: '#fcf8f0', ink: '#24211d', sub: '#6f675b', paper: '#fffdf8', soft: '#ece3cf' };
 
   /* geo: NT.layout.geometry の結果
-   * opts: { title, subtitle（指定時のみ図の中に見出しを描く＝書き出し用）, decorHref:(key)=>url,
+   * opts: { transparentBg（画面表示：背景はステージ側）, title, subtitle（指定時のみ図の中に見出しを描く＝書き出し用）, assetHref:(key)=>url（'bg'＝背景）,
    *         vignetteHref:(id)=>url（本人用の画像カード）, interactive, selected, focusLine, highlight:Set } */
   function svg(model, geo, opts) {
     opts = opts || {};
@@ -22,17 +22,10 @@
     out.push(`<filter id="nt-shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#5a4426" flood-opacity="0.18"/></filter>`);
     geo.vignettes.forEach((v, i) => out.push(`<clipPath id="nt-vc${i}"><rect x="${r1(v.x)}" y="${r1(v.y)}" width="${v.w}" height="${v.h}" rx="14"/></clipPath>`));
     out.push('</defs>');
-    out.push(`<rect class="nt-bg" x="${vb.x - 4000}" y="${vb.y - 4000}" width="${vb.w + 8000}" height="${vb.h + 8000}" fill="${C.bg}"/>`);
-    // 装飾（薄く・タッチを奪わない）
-    if (opts.decorHref) {
-      out.push('<g class="nt-decor" pointer-events="none">');
-      for (const d of geo.decor || []) {
-        const href = E(opts.decorHref(d.key));
-        if (!href) continue;
-        out.push(`<image href="${href}" xlink:href="${href}" x="${r1(d.x)}" y="${r1(d.y)}" width="${r1(d.w)}" height="${r1(d.h)}" opacity="${d.opacity || 0.3}" preserveAspectRatio="xMidYMid meet"/>`);
-      }
-      out.push('</g>');
-    }
+    if (!opts.transparentBg) out.push(`<rect class="nt-bg" x="${vb.x - 4000}" y="${vb.y - 4000}" width="${vb.w + 8000}" height="${vb.h + 8000}" fill="${C.bg}"/>`);
+    // 背景の水彩風景（地図全体を覆う。タッチを奪わない）
+    const bg = opts.assetHref && opts.assetHref('bg');
+    if (bg) out.push(`<image class="nt-bgimg" href="${E(bg)}" xlink:href="${E(bg)}" x="${r1(vb.x)}" y="${r1(vb.y)}" width="${r1(vb.w)}" height="${r1(vb.h)}" preserveAspectRatio="xMidYMid slice" pointer-events="none"/>`);
     // 見出し（書き出し用）
     if (opts.title) {
       const tx = vb.x + 44, ty = vb.y + 42;
@@ -125,5 +118,11 @@
   }
   function r1(v) { return Math.round(v * 10) / 10; }
 
-  NT.render = { svg, COLORS: C };
+  // 同梱画像のパス（単一HTML版では NT.ASSET_URIS のデータURIを使う）
+  function assetPath(k) {
+    if (NT.ASSET_URIS && NT.ASSET_URIS[k]) return NT.ASSET_URIS[k];
+    return k === 'bg' ? 'assets/bg_landscape.jpg' : `assets/decor/${k}.png`;
+  }
+
+  NT.render = { svg, assetPath, COLORS: C };
 })(globalThis.NT = globalThis.NT || {});

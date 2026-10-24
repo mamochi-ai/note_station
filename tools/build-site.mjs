@@ -10,7 +10,7 @@ const copy = (rel) => {
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.copyFileSync(src, dst);
 };
-for (const rel of ['index.html', 'css', 'js', 'assets/decor', 'assets/UI_SYMBOLS.svg', 'LICENSES.md']) copy(rel);
+for (const rel of ['index.html', 'css', 'js', 'assets/decor', 'assets/bg_landscape.jpg', 'assets/UI_SYMBOLS.svg', 'LICENSES.md']) copy(rel);
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 // 念のため：原本や本文らしきファイルが混入していないか確認
 const bad = [];

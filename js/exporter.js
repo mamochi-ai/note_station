@@ -5,30 +5,23 @@
   const U = NT.util;
 
 
-  const decorCache = {};
-  async function decorDataUri(key) {
-    if (decorCache[key]) return decorCache[key];
-    const src = (NT.DECOR_URIS && NT.DECOR_URIS[key]) || `assets/decor/${key}.png`;
-    if (src.startsWith('data:')) return (decorCache[key] = src);
+  const assetCache = {};
+  async function assetDataUri(key) {
+    if (assetCache[key]) return assetCache[key];
+    const src = NT.render.assetPath(key);
+    if (src.startsWith('data:')) return (assetCache[key] = src);
     const blob = await (await fetch(src)).blob();
     const uri = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
-    return (decorCache[key] = uri);
-  }
-  async function decorMap(geo) {
-    const m = {};
-    for (const d of geo.decor || []) {
-      try { m[d.key] = await decorDataUri(d.key); } catch (e) { /* 装飾なしでも描ける */ }
-    }
-    return m;
+    return (assetCache[key] = uri);
   }
 
   async function svgString(model, geo, opts) {
-    const m = await decorMap(geo);
-    const r = NT.render.svg(model, geo, Object.assign({}, opts, {
+    let bg = '';
+    try { bg = await assetDataUri('bg'); } catch (e) { /* 背景なしでも描ける */ }
+    return NT.render.svg(model, geo, Object.assign({}, opts, {
       interactive: false, selected: null, focusLine: null, highlight: null,
-      decorHref: (k) => m[k] || '',
+      assetHref: (k) => (k === 'bg' ? bg : ''),
     }));
-    return r;
   }
 
   async function toSvgBlob(model, geo, opts) {
@@ -76,9 +69,9 @@
     }
     // 装飾画像をデータURIで同梱
     const uris = {};
-    for (const k of Object.keys(NT.layout.DECOR)) { try { uris[k] = await decorDataUri(k); } catch (e) { /* なしでよい */ } }
+    for (const k of ['bg'].concat(Object.keys(NT.layout.DECOR))) { try { uris[k] = await assetDataUri(k); } catch (e) { /* なしでよい */ } }
     const decor = doc.createElement('script');
-    decor.textContent = 'globalThis.NT=globalThis.NT||{};NT.DECOR_URIS=' + JSON.stringify(uris).replace(/</g, '\\u003c') + ';';
+    decor.textContent = 'globalThis.NT=globalThis.NT||{};NT.ASSET_URIS=' + JSON.stringify(uris).replace(/</g, '\\u003c') + ';';
     const first = doc.querySelector('script');
     first.parentNode.insertBefore(decor, first);
     const data = doc.createElement('script');

@@ -221,41 +221,8 @@
     return { cell, bx, by, cols, rows, mark, isFree };
   }
 
-  /* ---------- 装飾の配置（空き領域に薄く・タッチを奪わない。記事の意味は持たない） ---------- */
+  // 駅カードの挿絵に使う水彩素材（地図の背景は assets/bg_landscape.jpg）
   const DECOR = { trees: [280, 209], town: [280, 184], bridge: [280, 235], station: [280, 223], clouds: [280, 210], train: [280, 220] };
-  function placeDecor(G, bounds, seed) {
-    if (!G) return [];
-    const rand = U.rng(seed * 31 + 5);
-    const out = [];
-    const spotsFor = (w, h) => {
-      const spots = [];
-      const step = G.cell;
-      for (let y = G.by; y + h < G.by + G.rows * G.cell; y += step) for (let x = G.bx; x + w < G.bx + G.cols * G.cell; x += step) if (G.isFree(x, y, w, h)) spots.push([x, y]);
-      return spots;
-    };
-    const put = (key, scale, opacity, gap) => {
-      const w = DECOR[key][0] * scale, h = DECOR[key][1] * scale;
-      const spots = spotsFor(w, h);
-      if (!spots.length) return false;
-      const [x, y] = spots[Math.floor(rand() * spots.length)];
-      out.push({ key, x, y, w, h, opacity });
-      G.mark(x - gap, y - gap, w + gap * 2, h + gap * 2);
-      return true;
-    };
-    const area = bounds.w * bounds.h;
-    // 大きな装飾（街・橋・駅舎・列車・雲）
-    const big = ['town', 'bridge', 'station', 'train', 'clouds'].sort(() => rand() - 0.5);
-    const wantBig = U.clamp(Math.round(area / 300000) + 2, 2, 8);
-    let nb = 0;
-    for (const scale of [0.95, 0.75, 0.6]) for (const k of big) { if (nb >= wantBig || out.some((o) => o.key === k && o.w > 150)) continue; if (put(k, scale, 0.36, 40)) nb++; }
-    // 小さな木立・雲を散らす（風景の地）
-    const wantSmall = U.clamp(Math.round(area / 70000), 4, 40);
-    for (let i = 0; i < wantSmall; i++) {
-      const k = rand() < 0.82 ? 'trees' : 'clouds';
-      put(k, 0.28 + rand() * 0.16, k === 'trees' ? 0.4 : 0.32, 18);
-    }
-    return out;
-  }
 
   /* ---------- 主要駅の画像カード（本人用・少数だけ） ---------- */
   function placeVignettes(G, stations, ids) {
@@ -279,7 +246,7 @@
   /* ---------- 全体：描画用ジオメトリ ---------- */
   // model: { mode, lines:[{id,name,color,order}], stations: Map, links, seed }
   // pos: Map sid→{x,y}（グリッド）, rows: Map lineId→段（グリッド）
-  // opts: { order, per（時間モード）, decor, vignettes:[id], planned:boolean }
+  // opts: { order, per（時間モード）, vignettes:[id], planned:boolean }
   function geometry(model, pos, rows, opts) {
     opts = opts || {};
     const st = model.stations;
@@ -402,7 +369,6 @@
     if (opts.titleBox) boxes.push({ x: geo.bounds.x - 60, y: geo.bounds.y - 175, w: 560, h: 120 });
     const G = occupancy(geo.bounds, boxes, segs, 190);
     geo.vignettes = placeVignettes(G, geo.stations, opts.vignettes || []);
-    geo.decor = opts.decor === false ? [] : placeDecor(G, geo.bounds, model.seed || 1);
     geo.segs = segs;
     geo.FS = FS;
     return geo;
