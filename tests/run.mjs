@@ -27,7 +27,9 @@ let failed = 0;
 async function test(name, fn) {
   const t0 = Date.now();
   try { const note = await fn(); results.push(`✔ ${name}${note ? ' — ' + note : ''} (${Date.now() - t0}ms)`); }
-  catch (e) { failed++; results.push(`✘ ${name}\n    ${String(e && e.stack || e).split('\n').slice(0, 3).join('\n    ')}`); }
+  catch (e) {
+    if (String(e && e.message).startsWith('SKIP:')) { results.push(`－ ${name}（未実施：${e.message.slice(5).trim()}）`); return; }
+    failed++; results.push(`✘ ${name}\n    ${String(e && e.stack || e).split('\n').slice(0, 3).join('\n    ')}`); }
 }
 const assert = (c, m) => { if (!c) throw new Error(m || 'assertion failed'); };
 
