@@ -1,0 +1,17 @@
+{
+  "name": "note-transit",
+  "private": true,
+  "version": "1.0.0",
+  "description": "わたしの記事路線図 / NOTE TRANSIT — noteの記事を地下鉄路線図にする静的Webアプリ",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "serve": "python3 -m http.server 8765",
+    "build:site": "node tools/build-site.mjs",
+    "build:standalone": "node tools/build-standalone.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  },
+  "license": "MIT"
+}

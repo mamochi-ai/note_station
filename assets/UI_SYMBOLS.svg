@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="60" viewBox="0 0 240 60">
+<defs>
+<symbol id="station" viewBox="0 0 40 40"><circle cx="20" cy="20" r="12" fill="#fffdf7" stroke="currentColor" stroke-width="5"/></symbol>
+<symbol id="interchange" viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#fffdf7" stroke="currentColor" stroke-width="3"/><circle cx="20" cy="20" r="11" fill="#fffdf7" stroke="currentColor" stroke-width="3"/></symbol>
+<symbol id="planned" viewBox="0 0 40 40"><circle cx="20" cy="20" r="13" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="4 4"/></symbol>
+<symbol id="route" viewBox="0 0 40 40"><path d="M4 30H13Q20 30 20 23V17Q20 10 27 10H36" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></symbol>
+</defs>
+<use href="#station" x="10" y="10" width="40" height="40" color="#ec693e"/>
+<use href="#interchange" x="70" y="10" width="40" height="40" color="#168c94"/>
+<use href="#planned" x="130" y="10" width="40" height="40" color="#8c9491"/>
+<use href="#route" x="190" y="10" width="40" height="40" color="#dba825"/>
+</svg>

@@ -1,0 +1,11 @@
+# 個人のnoteエクスポート原本・本文は公開リポジトリに含めない
+samples_private/
+*.zip
+*.wxr
+note-*.xml
+*.tmp.html
+# ビルド・依存
+dist/
+_site/
+node_modules/
+.DS_Store
