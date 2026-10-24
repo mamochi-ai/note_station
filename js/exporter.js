@@ -55,9 +55,9 @@
   async function fetchText(url) { const r = await fetch(url); if (!r.ok) throw new Error('読み込み失敗: ' + url); return r.text(); }
 
   /* 閲覧用HTML：アプリ一式＋共有データ（URL共有と同じ内容）を自己完結で埋め込む */
-  async function viewerHtml(payloadJson, title) {
+  async function viewerHtml(payloadJson, title, thumbs) {
     const doc = new DOMParser().parseFromString(NT.BOOT_HTML || '', 'text/html');
-    doc.querySelectorAll('script#nt-embedded').forEach((n) => n.remove());
+    doc.querySelectorAll('script#nt-embedded, script#nt-embedded-thumbs').forEach((n) => n.remove());
     for (const el of Array.from(doc.querySelectorAll('[data-nt-inline]'))) {
       if (el.tagName === 'LINK') {
         const css = await fetchText(el.getAttribute('href'));
@@ -78,6 +78,13 @@
     data.type = 'application/json'; data.id = 'nt-embedded';
     data.textContent = payloadJson.replace(/</g, '\\u003c');
     first.parentNode.insertBefore(data, first);
+    // 本人が選んだときだけ：地図上の画像カード（縮小JPEG）
+    if (thumbs && Object.keys(thumbs).length) {
+      const t = doc.createElement('script');
+      t.type = 'application/json'; t.id = 'nt-embedded-thumbs';
+      t.textContent = JSON.stringify(thumbs).replace(/</g, '\\u003c');
+      first.parentNode.insertBefore(t, first);
+    }
     const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]');
     if (csp) csp.setAttribute('content', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'");
     doc.title = (title || 'NOTE TRANSIT') + '（閲覧用）';

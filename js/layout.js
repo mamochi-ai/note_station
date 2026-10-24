@@ -498,6 +498,9 @@
     if (opts.titleBox) boxes.push({ x: geo.bounds.x - 60, y: geo.bounds.y - 175, w: 560, h: 120 });
     const G = occupancy(geo.bounds, boxes, segs, 190);
     geo.vignettes = placeVignettes(G, geo.stations, opts.vignettes || []);
+    // 画像カードも図の範囲に含める（書き出しの見出しと重ならないように）
+    for (const v of geo.vignettes) grow(v.x - 8, v.y - 8, v.w + 16, v.h + 16);
+    geo.bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     geo.segs = segs;
     geo.FS = FS;
     return geo;

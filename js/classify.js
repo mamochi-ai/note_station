@@ -77,7 +77,8 @@
     }
 
     const k = targetLines(N, rand, seed) + lines.length;
-    const maxDf = Math.max(2, Math.ceil(N * 0.6));
+    // 全体に出すぎる語で全部を1本にしない（ただし4記事以下なら全員に共通する語でもよい）
+    const maxDf = N <= 4 ? N : Math.max(2, Math.ceil(N * 0.6));
     const termDocs = new Map();
     for (const [id, d] of docs) {
       if (lockedMembers.has(id)) continue;
