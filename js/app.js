@@ -425,7 +425,8 @@
 
   /* 主要駅（乗換駅・終点・始発）の見出し画像候補を小さなカードで添える（本人用・最大4枚・1枚ずつ読み込み） */
   function vignetteIds(model) {
-    if (S.viewer || model.mode === 'time' || !S.project || S.project.settings.showVignettes === false) return [];
+    if (S.viewer) return model.mode === 'time' || !S.viewerThumbs ? [] : [...S.viewerThumbs.keys()].filter((id) => model.stations.has(id));
+    if (model.mode === 'time' || !S.project || S.project.settings.showVignettes === false) return [];
     const deg = new Map();
     model.lines.forEach((L) => L.order.forEach((id) => deg.set(id, (deg.get(id) || 0) + 1)));
     const ends = new Set();
@@ -478,7 +479,7 @@
     if (intro) S.introUntil = performance.now() + 1600;
     const r = NT.render.svg(model, geo, {
       interactive: true, selected: S.sel, intro,
-      focusLine: S.focus, focusLines: selLines, highlight: highlightSet(model), transparentBg: true, vignetteHref: (id) => S.vigUrls.get(id) || '',
+      focusLine: S.focus, focusLines: selLines, highlight: highlightSet(model), transparentBg: true, vignetteHref: (id) => S.vigUrls.get(id) || (S.viewerThumbs && S.viewerThumbs.get(id)) || '',
     });
     const host = $('#svg-host');
     host.innerHTML = r.svg; // render.svg はすべての文字列をエスケープ済み
@@ -1145,9 +1146,9 @@
     if (!base) {
       const inp = h('input', { type: 'url', placeholder: 'https://（公開したこのアプリのURL）', value: st.baseUrl || '' });
       inp.addEventListener('change', () => { const u = U.safeUrl(inp.value); if (inp.value && !u) return toast('https のURLを入力してください'); st.baseUrl = u ? u.split('#')[0] : ''; save(); openPanel('share', scope); });
-      body.push(h('div', { class: 'warn' }, h('p', {}, `いま開いているURL（${location.protocol === 'file:' ? 'ファイル' : location.host || location.protocol}）は一時的・端末内のURLのため、共有リンクには使えません。公開した静的サイトのURLを入力してください（例：GitHub Pages のURL）。`), inp));
+      body.push(h('div', { class: 'warn' }, h('p', {}, `いま開いているページ（${location.protocol === 'file:' ? 'ファイル' : location.host || location.protocol}）は一時的なアドレスなので、ほかの人は開けません。このアプリを公開しているアドレスを入力してください（例：https://mamochi-ai.github.io/note_station/）。`), inp));
     } else if (st.baseUrl) {
-      body.push(h('p', { class: 'meta' }, '共有先の公開URL：' + base + '（メニューの設定で変更）'));
+      body.push(h('p', { class: 'meta' }, '共有リンクの先頭アドレス：' + base + '（メニューで変更できます）'));
     }
     if (over) {
       body.push(h('div', { class: 'warn' }, h('b', {}, `URLが目安（${st.shareLimit.toLocaleString()}文字）を超えています。`),
@@ -1243,6 +1244,12 @@
       btn('駅を検索', () => openPanel('search'), 'small'),
       S.viewer ? null : btn('図の履歴', () => openPanel('history'), 'small')));
     body.push(h('h4', {}, '書き出し'));
+    if (!S.viewer) {
+      const ex = h('input', { type: 'checkbox', checked: !!S.project.settings.exportThumbs });
+      ex.addEventListener('change', () => { S.project.settings.exportThumbs = ex.checked; save(); });
+      body.push(h('label', { class: 'check' }, ex, h('span', {}, '「画像で保存」と「閲覧用HTML」に、地図上の画像カード（主要駅の見出し画像候補）も入れる',
+        h('br'), h('small', { class: 'meta' }, '記事の本文にある先頭の画像が、そのまま人に見えます。見せたくない画像は、駅のカードの「詳しく見る」→「非表示にする」で外してください。共有URLには画像は入りません。'))));
+    }
     body.push(h('div', { class: 'row' },
       btn('SVG（図）', () => exportImage('svg')),
       btn('PNG（画像）', () => exportImage('png')),
@@ -1276,7 +1283,8 @@
     body.push(h('label', { class: 'field' }, h('span', {}, '共有URLの長さの目安（文字）'), lim));
     const base = h('input', { type: 'url', value: S.project.settings.baseUrl || '', placeholder: isPermanentHere() ? location.origin + location.pathname + '（自動）' : 'https://…' });
     base.addEventListener('change', () => { const u = U.safeUrl(base.value); if (base.value && !u) return toast('https のURLを入力してください'); S.project.settings.baseUrl = u ? u.split('#')[0] : ''; save(); });
-    body.push(h('label', { class: 'field' }, h('span', {}, '公開URL（共有リンクの先頭。空欄なら今のURL）'), base));
+    body.push(h('label', { class: 'field' }, h('span', {}, '共有リンクの先頭アドレス（ふつうは空欄のままでOK）'), base));
+    body.push(h('p', { class: 'meta' }, '共有リンクは「このアドレス＋路線図のデータ」でできています。空欄なら、いま開いているこのアプリのアドレスが使われます。アプリを別の場所へ引っ越したときだけ入力してください。'));
     const vig = h('input', { type: 'checkbox', checked: S.project.settings.showVignettes !== false });
     vig.addEventListener('change', () => { S.project.settings.showVignettes = vig.checked; save(); renderMap(); });
     body.push(h('label', { class: 'check' }, vig, '主要駅のそばに見出し画像候補を小さく表示する（本人の画面だけ。共有・書き出しには入りません）'));
@@ -1300,11 +1308,37 @@
   }
 
   /* ---------- 書き出し ---------- */
+  // 画像カード用：表示中の見出し画像候補を小さなJPEGのデータURIに（書き出しに埋め込む）
+  async function thumbDataUri(id) {
+    const a = artById(id);
+    if (!a || a.imageHidden) return '';
+    const url = S.vigUrls.get(id) || await loadImage(a);
+    if (!url) return '';
+    // blob: は fetch できない（CSP の connect-src）ので、img 要素で読み込んで縮小する
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+    const w = img.naturalWidth, hgt = img.naturalHeight;
+    if (!w || !hgt) return '';
+    const k = Math.min(1, 360 / Math.max(w, hgt));
+    const c = document.createElement('canvas');
+    c.width = Math.round(w * k); c.height = Math.round(hgt * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  }
+  async function exportThumbs(ids) {
+    const out = new Map();
+    if (S.viewer || !S.project.settings.exportThumbs) return out;
+    for (const id of ids) { try { const u = await thumbDataUri(id); if (u) out.set(id, u); } catch (e) { /* 画像なしで続ける */ } }
+    return out;
+  }
   async function exportImage(kind) {
     try {
       const model = modelFor(S.mode); if (model.mode !== 'surprise') model.links = [];
       const geo = geometry(model);
       const opts = { title: model.title, subtitle: '書いてきたことが、つながって見える。' };
+      // 選んだときだけ、地図上の画像カードも入れる（閲覧モードでは共有された画像カードをそのまま）
+      const thumbs = S.viewer ? (S.viewerThumbs || new Map()) : await exportThumbs(geo.vignettes.map((v) => v.id));
+      if (thumbs.size) opts.vignetteHref = (id) => thumbs.get(id) || '';
       const base = (model.title || 'note-transit').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40);
       if (kind === 'svg') {
         const blob = await NT.exporter.toSvgBlob(model, geo, opts);
@@ -1322,7 +1356,12 @@
       progress(true, '閲覧用HTMLを作っています', 0.5);
       const st = S.project.settings;
       const p = NT.share.payload(view, { dates: st.shareDates, analysis: st.shareAnalysis });
-      const html = await NT.exporter.viewerHtml(JSON.stringify(p), S.project.title);
+      // 画像カード（選んだときだけ）：閲覧用HTMLの駅番号 s0, s1… に合わせて同梱
+      const ids = vignetteIds(modelFor('topic')).filter((id) => view.stations.some((x) => x.id === id));
+      const th = await exportThumbs(ids);
+      const thumbs = {};
+      view.stations.forEach((x, i) => { if (th.has(x.id)) thumbs['s' + i] = th.get(x.id); });
+      const html = await NT.exporter.viewerHtml(JSON.stringify(p), S.project.title, thumbs);
       progress(false);
       const base = (S.project.title || 'note-transit').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40);
       await NT.exporter.deliver(new Blob([html], { type: 'text/html' }), base + '_閲覧用.html');
@@ -1546,6 +1585,22 @@
     }
   }
 
+  // 閲覧用HTMLに同梱された画像カード（形式・件数・大きさを確かめてから使う）
+  function readEmbeddedThumbs(v) {
+    const out = new Map();
+    const el = document.getElementById('nt-embedded-thumbs');
+    if (!el) return out;
+    try {
+      const o = JSON.parse(el.textContent);
+      for (const [k, u] of Object.entries(o || {}).slice(0, 8)) {
+        if (!/^s\d+$/.test(k) || !v.stations.some((x) => x.id === k)) continue;
+        if (typeof u !== 'string' || u.length > 400000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(u)) continue;
+        out.set(k, u);
+      }
+    } catch (e) { /* 画像なしで表示 */ }
+    return out;
+  }
+
   async function boot() {
     bind();
     // 地図の背景：水彩の風景を画面いっぱいに敷き、その上で路線図を動かす
@@ -1553,7 +1608,11 @@
     // 閲覧用HTMLに埋め込まれた共有データ
     const emb = document.getElementById('nt-embedded');
     if (emb) {
-      try { loadViewer(NT.share.validate(JSON.parse(emb.textContent))); } catch (e) { show('start'); showError(e); }
+      try {
+        const v = NT.share.validate(JSON.parse(emb.textContent));
+        S.viewerThumbs = readEmbeddedThumbs(v);
+        loadViewer(v);
+      } catch (e) { show('start'); showError(e); }
       return;
     }
     try {

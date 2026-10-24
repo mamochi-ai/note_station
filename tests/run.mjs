@@ -547,6 +547,47 @@ await test('初回の描画演出：通常は線が引かれて駅が現れる�
   assert(!reduced.intro && reduced.op === 1, '動きを減らす設定では演出なし ' + JSON.stringify(reduced));
 });
 
+await test('画像カード：選んだときだけ閲覧用HTMLに入り、ファイルを開いた人にも見える（初期はオフ）', async () => {
+  // 画像つきの小さなエクスポートZIPを作る
+  const zipB64 = await page.evaluate(async () => {
+    const png = async (color) => { const c = document.createElement('canvas'); c.width = 64; c.height = 48; const x = c.getContext('2d'); x.fillStyle = color; x.fillRect(0, 0, 64, 48); return new Uint8Array(await (await new Promise((r) => c.toBlob(r, 'image/png'))).arrayBuffer()); };
+    const items = [1, 2, 3].map((i) => `<item><title>ベランダ菜園でミニトマトを収穫 ${i}</title><link>https://note.com/someone/n/n00000000000${i}</link><content:encoded><![CDATA[<p><img src="/assets/p${i}.png"></p><p>ベランダ 収穫 ミニトマト</p>]]></content:encoded><wp:post_id>${i}</wp:post_id><wp:post_date>2025-01-0${i} 10:00:00</wp:post_date><wp:status>publish</wp:status><wp:post_type>post</wp:post_type></item>`).join('');
+    const xml = `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:wp="http://wordpress.org/export/1.2/"><channel><title>t</title>${items}</channel></rss>`;
+    const z = fflate.zipSync({ 'a.xml': new TextEncoder().encode(xml), 'assets/p1.png': await png('#d9653b'), 'assets/p2.png': await png('#168c94'), 'assets/p3.png': await png('#d9a21b') });
+    let s = ''; for (const b of z) s += String.fromCharCode(b); return btoa(s);
+  });
+  const ctx9 = await browser.newContext({ viewport: { width: 1194, height: 834 }, acceptDownloads: true });
+  const p9 = await ctx9.newPage();
+  p9.on('pageerror', (e) => consoleErrors.push('pageerror: ' + e.message));
+  await p9.goto(BASE);
+  await p9.setInputFiles('#file-zip', { name: 'export.zip', mimeType: 'application/zip', buffer: Buffer.from(zipB64, 'base64') });
+  await p9.waitForSelector('#screen-import:not([hidden])');
+  await p9.click('#btn-build');
+  await p9.waitForFunction(() => document.querySelectorAll('.nt-vignettes image').length > 0, null, { timeout: 8000 });
+  const saveHtml = async () => {
+    await p9.click('#btn-menu');
+    const [dl] = await Promise.all([p9.waitForEvent('download'), p9.click('button:has-text("閲覧用HTML")')]);
+    const f = await dl.path();
+    await p9.click('#btn-panel-close');
+    return fs.readFileSync(f, 'utf8');
+  };
+  const off = await saveHtml();
+  assert(!off.includes('id="nt-embedded-thumbs"') && !/data:image\/jpeg/.test(off.replace(/NT\.ASSET_URIS=[^;]*;/, '')), '初期（オフ）では画像カードを入れない');
+  await p9.evaluate(() => { NT.app.S.project.settings.exportThumbs = true; });
+  const on = await saveHtml();
+  assert(on.includes('id="nt-embedded-thumbs"'), 'オンでは同梱');
+  const tmp = path.join(process.env.NT_TMP || ROOT, 'viewer-thumbs.tmp.html');
+  fs.writeFileSync(tmp, on);
+  const p10 = await ctx9.newPage();
+  await p10.goto('file://' + tmp);
+  await p10.waitForSelector('#svg-host svg .nt-st');
+  const shown = await p10.$$eval('.nt-vignettes image', (e) => e.filter((x) => (x.getAttribute('href') || '').startsWith('data:image/jpeg')).length);
+  fs.unlinkSync(tmp);
+  await ctx9.close();
+  assert(shown >= 1, '閲覧用HTMLを開いた人にも画像カード ' + shown);
+  return `画像カード ${shown}枚（オフ時は0）`;
+});
+
 await test('console error なし', async () => {
   const errs = consoleErrors.filter((e) => !/favicon/.test(e));
   assert(errs.length === 0, errs.join('\n'));
