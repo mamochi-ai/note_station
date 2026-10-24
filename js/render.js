@@ -121,7 +121,9 @@
   // 同梱画像のパス（単一HTML版では NT.ASSET_URIS のデータURIを使う）
   function assetPath(k) {
     if (NT.ASSET_URIS && NT.ASSET_URIS[k]) return NT.ASSET_URIS[k];
-    return k === 'bg' ? 'assets/bg_landscape.jpg' : `assets/decor/${k}.png`;
+    if (k === 'bg') return 'assets/bg_landscape.jpg';
+    if (k.startsWith('guide')) return `assets/guide/export-${k.slice(5)}.jpg`;
+    return `assets/decor/${k}.png`;
   }
 
   NT.render = { svg, assetPath, COLORS: C };

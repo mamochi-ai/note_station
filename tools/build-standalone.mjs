@@ -9,6 +9,7 @@ html = html.replace(/<link rel="stylesheet" href="([^"]+)" data-nt-inline>/, (m,
 html = html.replace(/<script src="([^"]+)" data-nt-inline><\/script>/g, (m, src) => `<script data-nt-inline>${fs.readFileSync(path.join(ROOT, src), 'utf8').replace(/<\/script/gi, '<\\/script')}</script>`);
 const uris = {};
 for (const f of fs.readdirSync(path.join(ROOT, 'assets/decor'))) uris[f.replace(/\.png$/, '')] = 'data:image/png;base64,' + fs.readFileSync(path.join(ROOT, 'assets/decor', f)).toString('base64');
+for (const n of [1, 2]) uris['guide' + n] = 'data:image/jpeg;base64,' + fs.readFileSync(path.join(ROOT, `assets/guide/export-${n}.jpg`)).toString('base64');
 uris.bg = 'data:image/jpeg;base64,' + fs.readFileSync(path.join(ROOT, 'assets/bg_landscape.jpg')).toString('base64');
 html = html.replace('<script data-nt-inline>', `<script>globalThis.NT=globalThis.NT||{};NT.ASSET_URIS=${JSON.stringify(uris)};</script>\n<script data-nt-inline>`);
 html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`);

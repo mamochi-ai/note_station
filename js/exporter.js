@@ -69,7 +69,7 @@
     }
     // 装飾画像をデータURIで同梱
     const uris = {};
-    for (const k of ['bg'].concat(Object.keys(NT.layout.DECOR))) { try { uris[k] = await assetDataUri(k); } catch (e) { /* なしでよい */ } }
+    for (const k of ['bg', 'guide1', 'guide2'].concat(Object.keys(NT.layout.DECOR))) { try { uris[k] = await assetDataUri(k); } catch (e) { /* なしでよい */ } }
     const decor = doc.createElement('script');
     decor.textContent = 'globalThis.NT=globalThis.NT||{};NT.ASSET_URIS=' + JSON.stringify(uris).replace(/</g, '\\u003c') + ';';
     const first = doc.querySelector('script');
