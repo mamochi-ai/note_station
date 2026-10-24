@@ -403,6 +403,28 @@ await test('300記事: 描画・全体表示・検索', async () => {
   return `300駅 描画${r.ms}ms / 共有fragment ${r.frag}文字（目安超過→代替導線）`;
 });
 
+await test('凡例を横スクロールしても路線図は動かない（iPhone）', async () => {
+  const { ctx: c4, page: p4 } = await newPage({ ...devices['iPhone 13'] });
+  await p4.goto(BASE);
+  await p4.click('#btn-sample'); await p4.click('#btn-build');
+  await p4.waitForSelector('#svg-host svg .nt-st');
+  const before = await p4.$eval('#svg-host svg', (s) => s.getAttribute('viewBox'));
+  const box = await p4.$eval('#chips', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y + r.height / 2, w: r.width, sw: e.scrollWidth }; });
+  assert(box.sw > box.w, 'legend overflows');
+  const cdp = await c4.newCDPSession(p4);
+  const pt = (x) => [{ x, y: box.y, id: 1 }];
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt(box.x + box.w - 30) });
+  for (let i = 1; i <= 10; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pt(box.x + box.w - 30 - i * 25) });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await p4.waitForTimeout(300);
+  const after = await p4.$eval('#svg-host svg', (s) => s.getAttribute('viewBox'));
+  const scrolled = await p4.$eval('#chips', (e) => e.scrollLeft);
+  await c4.close();
+  assert(after === before, `map moved: ${before} -> ${after}`);
+  assert(scrolled > 50, 'legend scrolled ' + scrolled);
+  return `凡例 scrollLeft=${Math.round(scrolled)} / 地図は不動`;
+});
+
 await test('console error なし', async () => {
   const errs = consoleErrors.filter((e) => !/favicon/.test(e));
   assert(errs.length === 0, errs.join('\n'));
