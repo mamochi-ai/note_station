@@ -221,7 +221,16 @@ await test('共有URLの往復（他アカウント・独自ドメインURLも�
 
 // --- E2E：デモで作成 → 共有 → 新しいブラウザで閲覧 ---
 let shareUrl = null;
-await test('E2E: サンプル→路線図→駅タップ→詳細・ピンチ・回転', async () => {
+// 画面内に見えている駅（乗換駅以外を優先）を返す
+const visibleStation = (pg) => pg.evaluate(() => {
+  const S = NT.app.S; const r = document.getElementById('stage').getBoundingClientRect(); const k = r.width / S.vb.w;
+  const top = document.getElementById('topstack').getBoundingClientRect().bottom + 20, bottom = Math.min(document.getElementById('chips').getBoundingClientRect().top, document.querySelector('.map-tools').getBoundingClientRect().top) - 30;
+  const vis = S.geo.stations.filter((s) => { const x = r.left + (s.x - S.vb.x) * k, y = r.top + (s.y - S.vb.y) * k; return x > r.left + 30 && x < r.right - 30 && y > top && y < bottom; });
+  const st = vis.find((s) => !s.inter) || vis[0];
+  return st ? { id: st.id, title: S.model.stations.get(st.id).title, x: r.left + (st.x - S.vb.x) * k, y: r.top + (st.y - S.vb.y) * k } : null;
+});
+
+await test('E2E(iPad横): 初期はカードを閉じて地図が主役・乗換駅は1駅・駅タップで正しいタイトル・ピンチ・回転', async () => {
   await page.evaluate(() => NT.store.clear('project'));
   await page.goto(BASE); await page.waitForFunction(() => window.NT && NT.app);
   await page.click('#btn-sample');
@@ -230,15 +239,24 @@ await test('E2E: サンプル→路線図→駅タップ→詳細・ピンチ・
   assert(head.includes('24'), head);
   await page.click('#btn-build');
   await page.waitForSelector('#svg-host svg .nt-st');
-  const n = await page.$$eval('.nt-st', (e) => e.length);
-  assert(n === 24, 'stations ' + n);
-  // タップ
-  const st = (await page.$$('.nt-st'))[3];
-  const bb = await st.boundingBox();
-  await page.touchscreen.tap(bb.x + bb.width / 2, bb.y + bb.height / 2);
-  await page.waitForSelector('#panel:not([hidden])');
-  const link = await page.$eval('#panel-body a.btn', (a) => ({ href: a.href, rel: a.rel, target: a.target }));
-  assert(link.href.startsWith('https://example.com/transit-demo/') && link.rel.includes('noopener'), JSON.stringify(link));
+  const init = await page.evaluate(() => ({ hidden: document.getElementById('panel').hidden, sel: NT.app.S.sel }));
+  assert(init.hidden && init.sel === null, '初期はカードを閉じ、記事を自動選択しない ' + JSON.stringify(init));
+  // 乗換駅：複数路線に属する記事も、駅は1つだけ
+  const uniq = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll('.nt-st')].map((e) => e.getAttribute('data-sid'));
+    const multi = NT.app.S.model.lines.flatMap((L) => L.order).filter((id, i, a) => a.indexOf(id) !== i);
+    return { n: ids.length, uniq: new Set(ids).size, multi: [...new Set(multi)].length, interDrawn: NT.app.S.geo.stations.filter((s) => s.inter).length };
+  });
+  assert(uniq.n === 24 && uniq.uniq === 24, 'stations ' + JSON.stringify(uniq));
+  assert(uniq.multi >= 1 && uniq.interDrawn === uniq.multi, '乗換駅は単一駅 ' + JSON.stringify(uniq));
+  // タップ → その記事のタイトル
+  const vs = await visibleStation(page);
+  await page.touchscreen.tap(vs.x, vs.y);
+  await page.waitForSelector('#panel:not([hidden]) .card-title');
+  const title = await page.textContent('.card-title');
+  assert(title === vs.title, `title ${title} / ${vs.title}`);
+  const demoLink = await page.evaluate(() => ({ a: !!document.querySelector('#panel-body a.read-btn'), t: document.querySelector('.read-btn').textContent }));
+  assert(!demoLink.a && demoLink.t.includes('デモ記事のためリンクはありません'), 'demo link ' + JSON.stringify(demoLink));
   // ピンチ（CDP でタッチ2点）
   const vb0 = await page.$eval('#svg-host svg', (s) => s.getAttribute('viewBox'));
   const cdp = await page.context().newCDPSession(page);
@@ -250,21 +268,22 @@ await test('E2E: サンプル→路線図→駅タップ→詳細・ピンチ・
   const vb1 = await page.$eval('#svg-host svg', (s) => s.getAttribute('viewBox'));
   const w0 = +vb0.split(' ')[2], w1 = +vb1.split(' ')[2];
   assert(w1 < w0 * 0.6, `pinch zoom ${w0} -> ${w1}`);
-  // 回転（縦向き）→ 下部パネル
+  // 回転：縦は下から出るカード、横は右のカード
   await page.setViewportSize({ width: 834, height: 1194 });
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(250);
   const panel = await page.$eval('#panel', (e) => { const r = e.getBoundingClientRect(); return { top: r.top, h: innerHeight, w: r.width }; });
-  assert(panel.top > panel.h * 0.3 && panel.w > 800, 'bottom sheet in portrait ' + JSON.stringify(panel));
+  assert(panel.top > panel.h * 0.4 && panel.w > 800, 'bottom sheet in portrait ' + JSON.stringify(panel));
   await page.setViewportSize({ width: 1194, height: 834 });
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(250);
   const panel2 = await page.$eval('#panel', (e) => e.getBoundingClientRect().width);
   assert(panel2 < 500, 'right panel in landscape');
-  return `ピンチ viewBox幅 ${Math.round(w0)}→${Math.round(w1)}`;
+  return `乗換駅${uniq.multi}（単一駅）/ ピンチ viewBox幅 ${Math.round(w0)}→${Math.round(w1)}`;
 });
 
-await test('E2E: 編集（駅名変更・取り消し/やり直し）と再生成で編集を失わない', async () => {
-  await page.click('#btn-edit');
+await test('E2E: 編集（駅名変更・取り消し/やり直し）と再生成で編集を失わない（編集・前の図はメニューから）', async () => {
   const sid = await page.evaluate(() => NT.app.S.sel);
+  await page.click('#btn-menu'); await page.click('#btn-edit');
+  await page.evaluate((id) => NT.app.selectStation(id), sid);
   const inp = await page.$('#panel-body input[type="text"]');
   await inp.fill('テスト駅名');
   await inp.dispatchEvent('change');
@@ -283,11 +302,78 @@ await test('E2E: 編集（駅名変更・取り消し/やり直し）と再生�
   assert(svg.includes('テスト駅名'), '駅名は再生成後も保持');
   const after = await page.evaluate(() => ({ n: NT.app.S.project.maps.length, seed: NT.app.curMap().seed }));
   assert(after.n === before + 1, 'new version kept separately');
-  await page.click('#btn-prev-map');
+  await page.click('#btn-menu'); await page.click('#btn-prev-map');
   const back = await page.evaluate(() => NT.app.curMap().seed);
   assert(back === 0, 'prev map');
-  await page.click('#btn-edit');
+  await page.click('#btn-edit-done');
   return `再生成 seed ${after.seed} → 前の図 seed ${back}`;
+});
+
+await test('E2E(iPhone縦): 地図が主役・はみ出しなし・タップ→小さなカード→詳しく→次の駅へ移動→閉じる', async () => {
+  const { ctx: c5, page: p5 } = await newPage({ ...devices['iPhone 13'] });
+  await p5.goto(BASE);
+  await p5.click('#btn-sample'); await p5.click('#btn-build');
+  await p5.waitForSelector('#svg-host svg .nt-st');
+  await p5.waitForTimeout(400);
+  const lay = await p5.evaluate(() => {
+    const W = innerWidth, H = innerHeight;
+    const out = [...document.querySelectorAll('.topstack button, .legend, .map-tools')].filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect()).filter((r) => r.left < -1 || r.right > W + 1);
+    const top = document.getElementById('topstack').getBoundingClientRect();
+    const hdr = document.querySelector('.mapbar').getBoundingClientRect().height + document.querySelector('.toolbar').getBoundingClientRect().height;
+    return { scrollW: document.documentElement.scrollWidth, W, H, out: out.length, hdr, panelHidden: document.getElementById('panel').hidden, sel: NT.app.S.sel };
+  });
+  assert(lay.scrollW <= lay.W, '横にはみ出さない ' + JSON.stringify(lay));
+  assert(lay.out === 0, '操作ボタンが画面外に出ない');
+  assert(lay.hdr < lay.H * 0.17, 'ヘッダーがコンパクト ' + lay.hdr);
+  assert(lay.panelHidden && lay.sel === null, '初期はカードを閉じる');
+  const vs = await visibleStation(p5);
+  await p5.touchscreen.tap(vs.x, vs.y);
+  await p5.waitForSelector('#panel:not([hidden]) .card-title');
+  const card = await p5.evaluate(() => ({ title: document.querySelector('.card-title').textContent, h: document.getElementById('panel').getBoundingClientRect().height, H: innerHeight, detail: !!document.querySelector('.card-detail') }));
+  assert(card.title === vs.title, `title ${card.title} / ${vs.title}`);
+  assert(card.h < card.H * 0.5 && !card.detail, '小さなカード ' + JSON.stringify(card));
+  await p5.click('.more-btn');
+  await p5.waitForSelector('.card-detail');
+  const why = await p5.evaluate(() => ({ open: document.querySelector('details.why').open, text: document.querySelector('details.why').textContent }));
+  assert(!why.open, '理由は初期状態で折りたたみ');
+  // 次の駅（なければ前の駅）へ：地図が動いて、その駅がカードに隠れない
+  const nav = await p5.$('.nav-row .btn.next') || await p5.$('.nav-row button');
+  const before = await p5.evaluate(() => NT.app.S.sel);
+  await nav.click();
+  await p5.waitForTimeout(700);
+  const moved = await p5.evaluate(() => {
+    const S = NT.app.S; const st = S.geo.stations.find((s) => s.id === S.sel);
+    const r = document.getElementById('stage').getBoundingClientRect(); const k = r.width / S.vb.w;
+    const y = r.top + (st.y - S.vb.y) * k, x = r.left + (st.x - S.vb.x) * k;
+    const pt = document.getElementById('panel').getBoundingClientRect().top, tt = document.getElementById('topstack').getBoundingClientRect().bottom;
+    return { sel: S.sel, title: document.querySelector('.card-title').textContent, model: S.model.stations.get(S.sel).title, y, x, pt, tt, W: innerWidth };
+  });
+  assert(moved.sel !== before && moved.title === moved.model, '次の駅のカード');
+  assert(moved.y > moved.tt && moved.y < moved.pt && moved.x > 0 && moved.x < moved.W, '選択駅がカードの下に隠れない ' + JSON.stringify(moved));
+  await p5.click('#btn-panel-close');
+  const closed = await p5.evaluate(() => ({ hidden: document.getElementById('panel').hidden, sel: NT.app.S.sel }));
+  await c5.close();
+  assert(closed.hidden && closed.sel === null, '閉じると地図の閲覧に戻る');
+  return `ヘッダー${Math.round(lay.hdr)}px / カード${Math.round(card.h)}px（画面${card.H}px）`;
+});
+
+await test('実記事のURLは「noteで読む」で元の記事へ（本人のデータ）', async () => {
+  const { ctx: c6, page: p6 } = await newPage({ ...devices['iPhone 13'] });
+  await p6.goto(BASE);
+  const xml = await page.evaluate(() => (window.mkXml || ((items) => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:wp="http://wordpress.org/export/1.2/"><channel><title>t</title>${items.map((o) => `<item><title>${o.title}</title><link>${o.link}</link><content:encoded><![CDATA[${o.content}]]></content:encoded><wp:post_id>${o.id}</wp:post_id><wp:post_date>2025-01-0${o.id} 10:00:00</wp:post_date><wp:status>publish</wp:status><wp:post_type>post</wp:post_type></item>`).join('')}</channel></rss>`))([
+    { id: 1, title: 'ベランダ菜園でミニトマトを収穫', link: 'https://note.com/someone/n/n0123456789ab', content: '<p>ベランダ 収穫 ミニトマト</p>' },
+    { id: 2, title: 'ベランダ菜園のミニトマト日記', link: 'https://note.com/someone/n/n0123456789ac', content: '<p>ベランダ 収穫</p>' },
+  ]));
+  await p6.setInputFiles('#file-zip', { name: 'export.xml', mimeType: 'text/xml', buffer: Buffer.from(xml) });
+  await p6.waitForSelector('#screen-import:not([hidden])');
+  await p6.click('#btn-build');
+  await p6.waitForSelector('#svg-host svg .nt-st');
+  const id = await p6.evaluate(() => NT.app.S.geo.stations[0].id);
+  await p6.evaluate((x) => NT.app.selectStation(x), id);
+  const link = await p6.$eval('#panel-body a.read-btn', (a) => ({ href: a.href, rel: a.rel, target: a.target, text: a.textContent }));
+  await c6.close();
+  assert(link.href.startsWith('https://note.com/someone/n/') && link.rel.includes('noopener') && link.target === '_blank' && link.text.includes('noteで読む'), JSON.stringify(link));
+  return link.href;
 });
 
 await test('E2E: 共有パネル（件数・文字数・注意書き）→ URL', async () => {
@@ -306,7 +392,7 @@ await test('E2E: 新しいブラウザ状態（IndexedDBなし）でURLだけか
   const frag = shareUrl.slice(shareUrl.indexOf('#'));
   await p2.goto(BASE + frag);
   await p2.waitForSelector('#svg-host svg .nt-st');
-  const r = await p2.evaluate(() => ({ n: document.querySelectorAll('.nt-st').length, viewer: !document.getElementById('viewer-badge').hidden, copy: !document.getElementById('btn-copy-own').hidden, editHidden: document.getElementById('btn-edit').hidden }));
+  const r = await p2.evaluate(() => ({ n: document.querySelectorAll('.nt-st').length, viewer: !document.getElementById('viewer-badge').hidden, copy: !document.getElementById('btn-copy-own').hidden, editHidden: document.getElementById('btn-share').hidden && document.getElementById('btn-regen').hidden }));
   assert(r.n === 24 && r.viewer && r.copy && r.editHidden, JSON.stringify(r));
   const svg = await p2.$eval('#svg-host', (e) => e.innerHTML);
   assert(svg.includes('テスト駅名'), 'edited name shared');
@@ -379,6 +465,28 @@ await test('localhost などの一時URLを共有URLとして案内しない', a
   assert(!r.ta && r.txt.includes('一時的'), 'no URL for localhost');
 });
 
+await test('100記事（iPhone縦）: 初期表示は読める倍率・駅名の重なりなし', async () => {
+  const { ctx: c7, page: p7 } = await newPage({ ...devices['iPhone 13'] });
+  await p7.goto(BASE); await p7.waitForFunction(() => window.NT && NT.app);
+  const r = await p7.evaluate(async () => {
+    const res = await NT.wxr.buildArticles(NT.demo.synthRaw(100, 7), { site: { title: '合成' } });
+    const S = NT.app.S;
+    S.project = { v: 1, title: '合成100', articles: res.articles.map((a) => Object.assign({}, a, { short: NT.text.shortName(a.title), hidden: false, imageChoice: 0 })), maps: [], currentMap: null, settings: { shareLimit: 8000, baseUrl: '', shareDates: true, shareAnalysis: false, shareLinks: true } };
+    S.bodies = Object.fromEntries(res.articles.map((a) => [a.id, a._body])); S.F = null;
+    document.getElementById('screen-map').hidden = false; document.getElementById('screen-start').hidden = true;
+    NT.app.regen(0);
+    await new Promise((x) => setTimeout(x, 100));
+    const ppu = document.getElementById('stage').getBoundingClientRect().width / S.vb.w;
+    const overlaps = [...S.geo.labels.values()].filter((l) => l.cost >= 3).length;
+    return { ppu, overlaps, n: document.querySelectorAll('.nt-st').length, font: 17 * ppu };
+  });
+  await c7.close();
+  assert(r.n === 100, 'n ' + r.n);
+  assert(r.font >= 10, '駅名が読める大きさ ' + r.font.toFixed(1) + 'px');
+  assert(r.overlaps <= 2, 'label overlaps ' + r.overlaps);
+  return `駅名 ${r.font.toFixed(1)}px相当 / 重なり ${r.overlaps}`;
+});
+
 await test('300記事: 描画・全体表示・検索', async () => {
   const r = await page.evaluate(async () => {
     const res = await NT.wxr.buildArticles(NT.demo.synthRaw(300, 11), { site: { title: '合成' } });
@@ -423,6 +531,20 @@ await test('凡例を横スクロールしても路線図は動かない（iPhon
   assert(after === before, `map moved: ${before} -> ${after}`);
   assert(scrolled > 50, 'legend scrolled ' + scrolled);
   return `凡例 scrollLeft=${Math.round(scrolled)} / 地図は不動`;
+});
+
+await test('初回の描画演出：通常は線が引かれて駅が現れる／「動きを減らす」設定では演出なし', async () => {
+  const run = async (reduced) => {
+    const { ctx: c8, page: p8 } = await newPage({ ...devices['iPhone 13'], reducedMotion: reduced ? 'reduce' : 'no-preference' });
+    await p8.goto(BASE); await p8.click('#btn-sample'); await p8.click('#btn-build');
+    await p8.waitForSelector('#svg-host svg .nt-st');
+    const r = await p8.evaluate(() => { const s = document.querySelector('#svg-host svg'); return { intro: s.classList.contains('nt-intro'), op: +getComputedStyle(s.querySelector('.nt-st')).opacity }; });
+    await c8.close();
+    return r;
+  };
+  const normal = await run(false), reduced = await run(true);
+  assert(normal.intro && normal.op < 1, '通常は演出 ' + JSON.stringify(normal));
+  assert(!reduced.intro && reduced.op === 1, '動きを減らす設定では演出なし ' + JSON.stringify(reduced));
 });
 
 await test('console error なし', async () => {
