@@ -574,7 +574,8 @@
     const ptrs = new Map();
     let start = null, pinch = null, moved = false, downTarget = null, t0 = 0;
     stage.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('.map-tools, .chips')) return;
+      // 凡例・ズームボタンの上では地図を動かさない（凡例は自分で横スクロール）
+      if (e.target.closest('.map-tools, .legend')) return;
       stage.setPointerCapture(e.pointerId);
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (ptrs.size === 1) {
@@ -643,6 +644,7 @@
     stage.addEventListener('pointerup', end);
     stage.addEventListener('pointercancel', end);
     stage.addEventListener('wheel', (e) => {
+      if (e.target.closest('.legend')) return;
       e.preventDefault();
       const s = stageSize();
       zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - s.left, e.clientY - s.top);
