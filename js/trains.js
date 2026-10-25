@@ -125,7 +125,7 @@
   // 別の線へ乗り移る（後ろの車両はしばらく元の線の上を走る）
   function enter(t, path, len, s, dir) {
     t.prev = { path: t.cur.path, len: t.cur.len, s: t.s, dir: t.dir };
-    t.cur = { path, len }; t.s = s; t.dir = dir; t.from = s;
+    t.cur = { path, len }; t.s = s; t.dir = dir; t.from = s; t.jx = s;
   }
 
   // 発車はゆっくり、目標の手前で減速。着いたら true
@@ -189,8 +189,9 @@
   }
 
   // 先頭から back だけ後ろの位置（乗り移った直後は元の線の上）
+  // （乗り移った地点 jx からの距離で決める。駅ごとに戻る from とは別）
   function at(t, back) {
-    const ran = Math.abs(t.s - t.from);
+    const ran = Math.abs(t.s - t.jx);
     if (t.prev && back > ran) {
       const p = t.prev;
       return { path: p.path, len: p.len, s: Math.max(0, Math.min(p.len, p.s - p.dir * (back - ran))), dir: p.dir };
@@ -199,6 +200,8 @@
   }
 
   function place(t) {
+    // 最後尾まで新しい線に入ったら、元の線は忘れる
+    if (t.prev && Math.abs(t.s - t.jx) >= SPAN * (t.cars.length - 1)) t.prev = null;
     const poses = t.cars.map((c, i) => {
       const q = at(t, i * SPAN);
       const a = q.path.getPointAtLength(Math.max(0, q.s - 1)), b = q.path.getPointAtLength(Math.min(q.len, q.s + 1));

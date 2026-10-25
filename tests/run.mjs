@@ -601,6 +601,32 @@ await test('路線図を走る電車：動く・編集中と「動きを減ら�
   return `${n}編成`;
 });
 
+await test('電車：意外な乗換の点線へ寄り道しても車両が離れない', async () => {
+  const { ctx: cs, page: ps } = await newPage({ ...devices['iPad Pro 11 landscape'] });
+  await ps.addInitScript(() => { Math.random = () => 0.01; }); // 毎回寄り道する
+  await ps.clock.install();
+  await ps.goto(BASE); await ps.click('#btn-sample'); await ps.click('#btn-build'); await ps.clock.runFor(500);
+  await ps.waitForSelector('.nt-st');
+  await ps.click('.seg [data-mode="surprise"]'); await ps.click('#btn-panel-close');
+  let worst = 0, onLink = 0;
+  for (let i = 0; i < 700; i++) {
+    await ps.clock.runFor(160);
+    const r = await ps.evaluate(() => {
+      const xy = (c) => { const m = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(c.getAttribute('transform')); return [+m[1], +m[2]]; };
+      const tr = Array.from(document.querySelectorAll('.nt-trains > g')).map((g) => Array.from(g.children).map(xy));
+      // 点線の上にいる車両があるか（点線の中ほどの点と近いか）
+      const mids = Array.from(document.querySelectorAll('.nt-links path')).map((p) => { const q = p.getPointAtLength(p.getTotalLength() / 2); return [q.x, q.y]; });
+      const near = tr.flat().some((c) => mids.some((m) => Math.hypot(c[0] - m[0], c[1] - m[1]) < 30));
+      return { gaps: tr.map(([a, b]) => Math.hypot(a[0] - b[0], a[1] - b[1])), near };
+    });
+    worst = Math.max(worst, ...r.gaps); if (r.near) onLink++;
+  }
+  await cs.close();
+  assert(onLink > 0, '点線を渡っていない');
+  assert(worst < 80, '車両が離れた ' + worst.toFixed(1));
+  return `車両の間隔 最大${worst.toFixed(0)}（点線の上 ${onLink}回）`;
+});
+
 await test('画像カード：選んだときだけ閲覧用HTMLに入り、ファイルを開いた人にも見える（初期はオフ）', async () => {
   // 画像つきの小さなエクスポートZIPを作る
   const zipB64 = await page.evaluate(async () => {
