@@ -573,6 +573,8 @@ await test('路線図を走る電車：動く・編集中と「動きを減ら�
   const a = await pos(); await pt.waitForTimeout(1500); const b = await pos();
   const n = await pt.evaluate(() => document.querySelectorAll('.nt-trains > g').length);
   assert(n > 0 && a !== b, 'moving ' + n);
+  // 左向きの電車は上下を返して逆さまにしない
+  assert(/scale\(1\.8 -1\.8\)/.test(a + b) && /scale\(1\.8 1\.8\)/.test(a + b), '左右どちら向きも正立 ' + (a + b).slice(0, 120));
   const pe = await pt.evaluate(() => document.querySelector('.nt-trains').getAttribute('pointer-events'));
   assert(pe === 'none', '駅のタップを邪魔しない');
   // 編集中は走らない
