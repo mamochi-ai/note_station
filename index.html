@@ -68,6 +68,7 @@
       </div>
       <div class="bar-actions">
         <button id="btn-share" class="btn primary small" type="button" data-owner><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4M5 13v6h14v-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>共有</button>
+        <button id="btn-back-own" class="btn small" type="button" hidden aria-label="自分の路線図に戻る">自分の図へ</button>
         <button id="btn-copy-own" class="btn primary small" type="button" data-viewer hidden>自分用にコピー</button>
         <button id="btn-menu" class="icon-btn" type="button" aria-label="メニュー（編集・画像保存など）"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
       </div>
@@ -88,6 +89,10 @@
       <button id="btn-fix" class="btn small" type="button" aria-pressed="false">図を固定</button>
       <button id="btn-edit-done" class="btn small primary" type="button">編集を終える</button>
       <span class="hint">駅をドラッグで移動・タップで編集</span>
+    </div>
+    <div id="previewbar" class="editbar previewbar" hidden>
+      <span class="hint">確認中：リンクを開いた人にはこう見えます（駅を押すとnoteへ）</span>
+      <button id="btn-preview-done" class="btn small primary" type="button">確認を終えて戻る</button>
     </div>
     </div>
     <div class="main">

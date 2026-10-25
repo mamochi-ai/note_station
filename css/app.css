@@ -72,6 +72,8 @@ html.on-map, html.on-map body { overflow: hidden; }
 .editbar { display: flex; gap: 6px; align-items: center; margin: 6px 14px 0; padding: 6px 8px; background: #efe5cf; border-radius: 12px; overflow-x: auto; touch-action: pan-x; scrollbar-width: none; }
 .editbar .btn { flex: 0 0 auto; }
 .editbar .hint { flex: 0 0 auto; font-size: 12px; color: var(--sub); }
+.previewbar { background: #dcefe9; }
+.previewbar .hint { flex: 1 1 auto; white-space: normal; color: var(--ink); }
 .main { position: absolute; inset: 0; display: flex; }
 /* 背景の水彩は薄いアイボリーの膜で控えめに（路線と駅名が先に目に入るように） */
 .stage { position: relative; flex: 1; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; background-color: var(--bg); background-size: cover; background-position: center 30%; background-repeat: no-repeat; }
