@@ -279,7 +279,7 @@
     }
     const { project, bodies } = newProject(r, S.impKind, S.impName);
     S.project = project; S.bodies = bodies; S.F = null; S.zip = r.zip || null;
-    S.undo = []; S.redo = []; S.viewer = null; S.sel = null; S.focus = null;
+    S.undo = []; S.redo = []; S.viewer = null; S.preview = null; S.sel = null; S.focus = null;
     generate(0);
     await NT.store.put('private', 'bodies', bodies).catch(() => {});
     await NT.store.put('project', 'current', S.project).catch((e) => toast('端末内保存に失敗：' + e.message));
@@ -366,6 +366,11 @@
     document.querySelectorAll('[data-owner]').forEach((e) => { e.hidden = !owner; });
     document.querySelectorAll('[data-viewer]').forEach((e) => { e.hidden = owner; });
     $('#viewer-badge').hidden = owner;
+    $('#previewbar').hidden = !(S.viewer && S.preview);
+    // 自分の図がこの端末にあるときは「自分の図へ」を出す（コピーはメニューから）
+    const hasOwn = !!(S.project && S.project.maps && S.project.maps.length);
+    $('#btn-back-own').hidden = owner || !!S.preview || !hasOwn;
+    $('#btn-copy-own').hidden = owner || !!S.preview || hasOwn;
     document.documentElement.classList.add('on-map');
     S.sel = null; S.focus = null; S.cardOpen = false; S.introPending = true;
     setEdit(false);
@@ -1153,7 +1158,7 @@
       way1.append(h('div', { class: 'row' },
         btn('リンクをコピー', () => copyText(url, ta), 'small primary'),
         navigator.share ? btn('共有シート', () => navigator.share({ url, title: S.project.title }).catch(() => {})) : null,
-        h('a', { class: 'btn small', href: url, target: '_blank', rel: 'noopener noreferrer' }, '自分で開いて確認 ↗')),
+        btn('相手に見える画面を確認', () => previewShare(url), 'small')),
         h('details', { class: 'mini' }, h('summary', {}, 'リンクの中身を見る'), ta));
     }
     body.push(way1);
@@ -1277,7 +1282,9 @@
       S.viewer ? null : btn('閲覧用HTML', () => exportHtml(shareView({})))));
     body.push(h('p', { class: 'meta' }, 'PNG/SVGは図の画像です。駅をタップして記事を開くことはできません。閲覧用HTMLは1ファイルで動き、本文を含みません（iPhone/iPadでHTMLファイルを開けるかは環境によるため、共有は主にURLで行ってください）。'));
     if (S.viewer) {
-      body.push(h('h4', {}, 'このリンク'), h('div', { class: 'row' }, btn('このURLをコピー', () => copyText(location.href)), btn('自分用にコピーして編集', copyToOwn, 'small primary')));
+      if (!S.preview) body.push(h('h4', {}, 'このリンク'), h('div', { class: 'row' }, btn('このURLをコピー', () => copyText(location.href)), btn('自分用にコピーして編集', copyToOwn, 'small primary')));
+      if (S.preview) body.push(h('div', { class: 'row' }, btn('確認を終えて戻る', () => { closePanel(); backToOwn(); }, 'small primary')));
+      else if (S.project && S.project.maps && S.project.maps.length) body.push(h('div', { class: 'row' }, btn('自分の路線図に戻る', () => { closePanel(); backToOwn(); }, 'small')));
       body.push(about());
       return { title: 'メニュー', body };
     }
@@ -1410,7 +1417,7 @@
         const ok = await dialog('端末内の路線図をこのJSONの内容で置き換えます。', [{ label: 'やめる', value: false }, { label: '置き換える', value: true, primary: true }]);
         if (!ok) return;
       }
-      S.project = data.project; S.bodies = data.bodies || {}; S.F = null; S.viewer = null; S.zip = null;
+      S.project = data.project; S.bodies = data.bodies || {}; S.F = null; S.viewer = null; S.preview = null; S.zip = null;
       S.project.settings = Object.assign({ shareLimit: 8000, baseUrl: '', shareDates: true, shareAnalysis: false, shareLinks: true }, S.project.settings || {});
       if (!curMap()) generate(0);
       await NT.store.put('project', 'current', S.project);
@@ -1484,6 +1491,22 @@
     S.viewer = v; S.mode = v.mode; S.sel = null; S.focus = null; S.rev++;
     openMap();
   }
+  // 共有リンクを開いた人の画面を、この画面の中で確かめる（別タブにしないので必ず戻れる）
+  function previewShare(url) {
+    let v;
+    try { v = NT.share.decode(url.slice(url.indexOf('#'))); } catch (e) { showError(e); return; }
+    S.preview = { mode: S.mode };
+    loadViewer(v);
+  }
+  // 閲覧モードから、この端末にある自分の路線図へ戻る
+  function backToOwn() {
+    const pv = S.preview;
+    S.preview = null; S.viewer = null; S.viewerThumbs = null; clearHash();
+    if (!S.project || !curMap()) { goHome(); return; }
+    S.mode = pv ? pv.mode : S.mode; S.rev++;
+    openMap();
+    if (pv) openPanel('share', {});
+  }
   async function copyToOwn() {
     const v = S.viewer;
     if (S.project) {
@@ -1537,7 +1560,8 @@
   /* ---------- 起動 ---------- */
   function goHome() {
     document.documentElement.classList.remove('on-map');
-    S.viewer = null; clearHash(); closePanel();
+    S.viewer = null; S.preview = null; clearHash(); closePanel();
+    $('#previewbar').hidden = true;
     $('#btn-resume').hidden = !S.project;
     show('start');
   }
@@ -1573,6 +1597,8 @@
       else if (dy > 0) { if (S.cardOpen) setCardExpanded(false); else closePanel(); }
     });
     $('#btn-copy-own').addEventListener('click', copyToOwn);
+    $('#btn-back-own').addEventListener('click', backToOwn);
+    $('#btn-preview-done').addEventListener('click', backToOwn);
     $('#btn-menu').addEventListener('click', () => openPanel('menu'));
     $('#btn-panel-close').addEventListener('click', () => { closePanel(); if (S.search) { S.search = null; renderMap(); } });
     $('#btn-zoom-in').addEventListener('click', () => { const s = stageSize(); zoomAt(1.4, s.w / 2, s.h / 2); });

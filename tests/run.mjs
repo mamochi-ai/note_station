@@ -391,13 +391,27 @@ await test('E2E: 共有パネル（件数・文字数・注意書き）→ URL',
   return `URL ${shareUrl.length}文字`;
 });
 
+await test('E2E: 「相手に見える画面を確認」は同じ画面で開き、元の路線図へ戻れる', async () => {
+  const before = await page.evaluate(() => ({ seed: NT.app.curMap().seed, title: document.getElementById('map-title').textContent }));
+  const pages0 = page.context().pages().length;
+  await page.click('#panel-body button:has-text("相手に見える画面を確認")');
+  await page.waitForSelector('#previewbar:not([hidden])');
+  const r = await page.evaluate(() => ({ viewer: !!NT.app.S.viewer, badge: !document.getElementById('viewer-badge').hidden, copy: document.getElementById('btn-copy-own').hidden, n: document.querySelectorAll('.nt-st').length }));
+  assert(r.viewer && r.badge && r.copy && r.n > 0 && page.context().pages().length === pages0, JSON.stringify(r));
+  await page.click('#btn-preview-done');
+  await page.waitForSelector('#previewbar', { state: 'hidden' });
+  const after = await page.evaluate(() => ({ viewer: !!NT.app.S.viewer, seed: NT.app.curMap().seed, title: document.getElementById('map-title').textContent, share: !document.getElementById('btn-share').hidden, panel: NT.app.S.panel && NT.app.S.panel.kind }));
+  assert(!after.viewer && after.seed === before.seed && after.title === before.title && after.share && after.panel === 'share', JSON.stringify(after));
+  return '確認→戻る（新しいタブなし）';
+});
+
 await test('E2E: 新しいブラウザ状態（IndexedDBなし）でURLだけから閲覧', async () => {
   const { ctx: c2, page: p2 } = await newPage();
   const frag = shareUrl.slice(shareUrl.indexOf('#'));
   await p2.goto(BASE + frag);
   await p2.waitForSelector('#svg-host svg .nt-st');
-  const r = await p2.evaluate(() => ({ n: document.querySelectorAll('.nt-st').length, viewer: !document.getElementById('viewer-badge').hidden, copy: !document.getElementById('btn-copy-own').hidden, editHidden: document.getElementById('btn-share').hidden && document.getElementById('btn-regen').hidden }));
-  assert(r.n === 24 && r.viewer && r.copy && r.editHidden, JSON.stringify(r));
+  const r = await p2.evaluate(() => ({ n: document.querySelectorAll('.nt-st').length, viewer: !document.getElementById('viewer-badge').hidden, copy: !document.getElementById('btn-copy-own').hidden, editHidden: document.getElementById('btn-share').hidden && document.getElementById('btn-regen').hidden, back: !document.getElementById('btn-back-own').hidden }));
+  assert(!r.back && r.n === 24 && r.viewer && r.copy && r.editHidden, JSON.stringify(r));
   const svg = await p2.$eval('#svg-host', (e) => e.innerHTML);
   assert(svg.includes('テスト駅名'), 'edited name shared');
   // 壊れたリンク
