@@ -494,6 +494,23 @@
     S.full = r.viewBox;
     renderChips(model);
     if (fit || !S.vb) fitTo(S.full, true, true); else applyVB();
+    runTrains(intro ? 1700 : 250);
+  }
+  // 路線図を走る電車（画面だけの演出。編集中・「動きを減らす」設定・オフのときは走らせない）
+  function trainsWanted() {
+    if (REDUCED.matches || S.edit) return false;
+    try { return localStorage.getItem('nt-trains') !== 'off'; } catch (e) { return true; }
+  }
+  function runTrains(delay) {
+    if (NT.trains && S.svg && trainsWanted() && !$('#screen-map').hidden) NT.trains.start(S.svg, S.geo, delay);
+    else if (NT.trains) NT.trains.stop();
+  }
+  function toggleTrains() {
+    const on = !trainsWanted();
+    try { localStorage.setItem('nt-trains', on ? 'on' : 'off'); } catch (e) { /* この端末に覚えられなくても切り替えはできる */ }
+    if (REDUCED.matches && on) toast('「動きを減らす」設定がオンのため、電車は走りません');
+    runTrains(0);
+    return on;
   }
 
   function legendMark(c) {
@@ -1266,6 +1283,7 @@
       S.viewer ? null : btn('前の図に戻る', () => { closePanel(); prevMap(); }, 'small', { id: 'btn-prev-map', disabled: prevDisabled }),
       S.viewer && !S.viewer.opts.analysis ? null : btn('振り返り', () => openPanel('analysis'), 'small', { id: 'btn-analysis' }),
       btn('駅を検索', () => openPanel('search'), 'small'),
+      btn(trainsWanted() ? '電車を止める' : '電車を走らせる', (e) => { const on = toggleTrains(); e.currentTarget.textContent = on ? '電車を止める' : '電車を走らせる'; }, 'small', { id: 'btn-trains' }),
       S.viewer ? null : btn('図の履歴', () => openPanel('history'), 'small')));
     if (!S.viewer) body.push(h('div', { class: 'row' }, btn('他の人に見せる（リンク・画像）', () => openPanel('share', {}), 'small primary')));
     body.push(h('h4', {}, 'ファイルに保存（自分用・パソコン用）'));
@@ -1483,6 +1501,7 @@
     $('#editbar').hidden = !S.edit;
     if (!S.edit) { S.multi = false; S.multiSel.clear(); $('#btn-multi').setAttribute('aria-pressed', 'false'); }
     if (S.edit && curMap()) $('#btn-fix').setAttribute('aria-pressed', String(!!curMap().fixed));
+    runTrains(300);
   }
 
   /* ---------- 閲覧モード ---------- */
@@ -1560,6 +1579,7 @@
   /* ---------- 起動 ---------- */
   function goHome() {
     document.documentElement.classList.remove('on-map');
+    if (NT.trains) NT.trains.stop();
     S.viewer = null; S.preview = null; clearHash(); closePanel();
     $('#previewbar').hidden = true;
     $('#btn-resume').hidden = !S.project;

@@ -565,6 +565,40 @@ await test('初回の描画演出：通常は線が引かれて駅が現れる�
   assert(!reduced.intro && reduced.op === 1, '動きを減らす設定では演出なし ' + JSON.stringify(reduced));
 });
 
+await test('路線図を走る電車：動く・編集中と「動きを減らす」では走らない・メニューで止められる・書き出しに入らない', async () => {
+  const { ctx: ct, page: pt } = await newPage({ ...devices['iPhone 13'] });
+  await pt.goto(BASE); await pt.click('#btn-sample'); await pt.click('#btn-build');
+  await pt.waitForSelector('#svg-host svg .nt-trains > g', { timeout: 8000 });
+  const pos = () => pt.evaluate(() => Array.from(document.querySelectorAll('.nt-trains > g > g')).map((g) => g.getAttribute('transform')).join('|'));
+  const a = await pos(); await pt.waitForTimeout(1500); const b = await pos();
+  const n = await pt.evaluate(() => document.querySelectorAll('.nt-trains > g').length);
+  assert(n > 0 && a !== b, 'moving ' + n);
+  const pe = await pt.evaluate(() => document.querySelector('.nt-trains').getAttribute('pointer-events'));
+  assert(pe === 'none', '駅のタップを邪魔しない');
+  // 編集中は走らない
+  await pt.evaluate(() => { document.getElementById('btn-menu').click(); });
+  await pt.click('#btn-edit'); await pt.waitForTimeout(400);
+  assert(await pt.evaluate(() => !document.querySelector('.nt-trains')), '編集中');
+  await pt.click('#btn-edit-done'); await pt.waitForSelector('.nt-trains > g', { timeout: 5000 });
+  // メニューで止める→走らせる（次に開いても覚えている）
+  await pt.click('#btn-menu'); await pt.click('#btn-trains');
+  assert(await pt.evaluate(() => !document.querySelector('.nt-trains')), 'off');
+  await pt.reload(); await pt.waitForSelector('#btn-resume:not([hidden])'); await pt.click('#btn-resume'); await pt.waitForSelector('.nt-st'); await pt.waitForTimeout(2200);
+  assert(await pt.evaluate(() => !document.querySelector('.nt-trains')), 'off remembered');
+  await pt.click('#btn-menu'); assert((await pt.textContent('#btn-trains')).includes('走らせる'), 'label'); await pt.click('#btn-trains');
+  await pt.waitForSelector('.nt-trains > g', { timeout: 5000 });
+  // 書き出し（SVG文字列）には入らない
+  const svg = await pt.evaluate(async () => (await NT.exporter.svgString(NT.app.S.model, NT.app.S.geo, {})).svg);
+  assert(!svg.includes('nt-trains'), 'export');
+  await ct.close();
+  const { ctx: cr, page: pr } = await newPage({ ...devices['iPhone 13'], reducedMotion: 'reduce' });
+  await pr.goto(BASE); await pr.click('#btn-sample'); await pr.click('#btn-build'); await pr.waitForSelector('.nt-st'); await pr.waitForTimeout(2500);
+  const rm = await pr.evaluate(() => !document.querySelector('.nt-trains'));
+  await cr.close();
+  assert(rm, '動きを減らす');
+  return `${n}編成`;
+});
+
 await test('画像カード：選んだときだけ閲覧用HTMLに入り、ファイルを開いた人にも見える（初期はオフ）', async () => {
   // 画像つきの小さなエクスポートZIPを作る
   const zipB64 = await page.evaluate(async () => {
