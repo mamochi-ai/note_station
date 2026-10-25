@@ -792,6 +792,7 @@
     pn.classList.toggle('expanded', kind === 'station' && !!S.cardOpen);
     $('#screen-map').classList.add('card-open');
     refreshPanel();
+    $('#panel-body').scrollTop = 0; pn.scrollTop = 0;
   }
   // カードを閉じて地図の閲覧に戻る（選んでいた駅の強調も解く）
   function closePanel() {
@@ -1128,46 +1129,64 @@
     const len = url ? url.length : enc.fragment.length + 40;
     const over = len > st.shareLimit;
     const body = [];
-    body.push(h('div', { class: 'stat-grid' },
-      h('div', { class: 'stat' }, h('b', {}, view.stations.length), h('span', {}, '共有する記事')),
-      h('div', { class: 'stat' }, h('b', {}, view.lines.length), h('span', {}, '路線')),
-      h('div', { class: 'stat' }, h('b', {}, len.toLocaleString()), h('span', {}, `URL文字数（目安 ${st.shareLimit.toLocaleString()}）`))));
-    body.push(h('div', { class: 'reason' },
-      h('div', {}, h('b', {}, '含めるもの：'), '駅名・原題・元記事URL・路線・駅順・配置・seed' + (st.shareDates ? '・公開日' : '') + (st.shareLinks ? '・意外な乗換' : '') + (st.shareAnalysis ? '・振り返り（月別数・路線別数）' : '')),
-      h('div', {}, h('b', {}, '含めないもの：'), '本文・抜粋・下書き・図から外した記事・画像・添付・原本ZIP・本文由来の共通語')));
-    body.push(h('p', { class: 'meta' }, '圧縮は暗号化ではありません。リンクを知っている人は上の内容を見られます。共有データは「#」より後ろにあり、サーバーへは送られません。'));
-    const chk = (label, key) => { const c = h('input', { type: 'checkbox', checked: !!st[key] }); c.addEventListener('change', () => { st[key] = c.checked; save(); openPanel('share', scope); }); return h('label', { class: 'check' }, c, label); };
-    body.push(chk('公開日を含める', 'shareDates'), chk('意外な乗換を含める', 'shareLinks'), chk('振り返り（月別投稿数・路線別記事数）を含める', 'shareAnalysis'));
-    // 範囲
-    const scopeSel = h('select', {}, h('option', { value: '' }, 'すべての路線'), S.model.lines.map((L) => h('option', { value: 'line:' + L.id, selected: scope.line === L.id }, `路線のみ：${L.name}`)),
-      [10, 30, 60, 100].filter((n) => n < S.model.stations.size).map((n) => h('option', { value: 'recent:' + n, selected: scope.recent === n }, `最近の${n}記事だけ`)));
-    scopeSel.addEventListener('change', () => { const v = scopeSel.value; openPanel('share', v.startsWith('line:') ? { line: v.slice(5) } : v.startsWith('recent:') ? { recent: +v.slice(7) } : {}); });
-    body.push(h('label', { class: 'field' }, h('span', {}, '共有する範囲'), scopeSel));
+    body.push(h('p', { class: 'meta' }, '見せ方は2つあります。noteの記事で紹介するなら、両方使うのがおすすめです。'));
+
+    // ① リンク：押して記事へ行ける（画像カードは入らない）
+    const way1 = h('section', { class: 'way' },
+      h('h4', {}, '① リンクで見せる（おすすめ）'),
+      h('p', {}, '見た人がこのアプリで路線図を開き、駅を押してあなたのnoteの記事へ行けます。リンクは文字だけでできているので、画像カードは入りません。'));
     if (!base) {
-      const inp = h('input', { type: 'url', placeholder: 'https://（公開したこのアプリのURL）', value: st.baseUrl || '' });
-      inp.addEventListener('change', () => { const u = U.safeUrl(inp.value); if (inp.value && !u) return toast('https のURLを入力してください'); st.baseUrl = u ? u.split('#')[0] : ''; save(); openPanel('share', scope); });
-      body.push(h('div', { class: 'warn' }, h('p', {}, `いま開いているページ（${location.protocol === 'file:' ? 'ファイル' : location.host || location.protocol}）は一時的なアドレスなので、ほかの人は開けません。このアプリを公開しているアドレスを入力してください（例：https://mamochi-ai.github.io/note_station/）。`), inp));
-    } else if (st.baseUrl) {
-      body.push(h('p', { class: 'meta' }, '共有リンクの先頭アドレス：' + base + '（メニューで変更できます）'));
+      const inp = h('input', { type: 'url', placeholder: 'https://（このアプリを公開しているアドレス）', value: st.baseUrl || '' });
+      inp.addEventListener('change', () => { const u = U.safeUrl(inp.value); if (inp.value && !u) return toast('https のアドレスを入力してください'); st.baseUrl = u ? u.split('#')[0] : ''; save(); openPanel('share', scope); });
+      way1.append(h('div', { class: 'warn' }, h('p', {}, `いま開いているページ（${location.protocol === 'file:' ? 'ファイル' : location.host || location.protocol}）は一時的なアドレスなので、ほかの人は開けません。このアプリを公開しているアドレスを入力してください（例：https://mamochi-ai.github.io/note_station/）。`), inp));
     }
     if (over) {
-      body.push(h('div', { class: 'warn' }, h('b', {}, `URLが目安（${st.shareLimit.toLocaleString()}文字）を超えています。`),
-        h('p', {}, '共有先によっては途中で切れて開けなくなります。次の方法を選んでください。'),
+      way1.append(h('div', { class: 'warn' }, h('b', {}, `リンクが長すぎるかもしれません（${len.toLocaleString()}文字・目安 ${st.shareLimit.toLocaleString()}文字）。`),
+        h('p', {}, '貼る場所によっては途中で切れて開けなくなります。範囲をしぼってください。'),
         h('div', { class: 'row' },
           S.model.lines[0] ? btn('路線ごとに共有する', () => openPanel('share', { line: S.model.lines[0].id })) : null,
           btn('記事を絞る（最近30件）', () => openPanel('share', { recent: 30 })),
           btn('閲覧用HTMLを保存', () => exportHtml(view)))));
     }
     if (url) {
-      const ta = h('textarea', { readonly: true, 'aria-label': '共有URL' }, url);
-      body.push(ta);
-      body.push(h('div', { class: 'row' },
-        btn('URLをコピー', () => copyText(url, ta), 'small primary'),
+      const ta = h('textarea', { readonly: true, 'aria-label': '共有リンク' }, url);
+      way1.append(h('div', { class: 'row' },
+        btn('リンクをコピー', () => copyText(url, ta), 'small primary'),
         navigator.share ? btn('共有シート', () => navigator.share({ url, title: S.project.title }).catch(() => {})) : null,
-        h('a', { class: 'btn small', href: url, target: '_blank', rel: 'noopener noreferrer' }, '閲覧画面で確認 ↗')));
-      body.push(h('p', { class: 'meta' }, 'URLの長さの上限はブラウザや共有先（SNS・メッセージアプリ）ごとに異なり、一律の保証はできません。届いたリンクが開けるか、一度確かめてください。'));
+        h('a', { class: 'btn small', href: url, target: '_blank', rel: 'noopener noreferrer' }, '自分で開いて確認 ↗')),
+        h('details', { class: 'mini' }, h('summary', {}, 'リンクの中身を見る'), ta));
     }
-    return { title: '共有', body };
+    body.push(way1);
+
+    // ② 画像：画像カードつきの1枚絵（押しても記事へは行けない）
+    const th = h('input', { type: 'checkbox', checked: !!st.exportThumbs });
+    th.addEventListener('change', () => { st.exportThumbs = th.checked; save(); });
+    body.push(h('section', { class: 'way' },
+      h('h4', {}, '② 画像で見せる'),
+      h('p', {}, '路線図を1枚の画像（PNG）にして保存します。noteやSNSにそのまま貼れます。画像なので、押しても記事には行けません。'),
+      h('label', { class: 'check' }, th, h('span', {}, '画像カード（主要駅のそばの見出し画像）も入れる', h('br'), h('small', { class: 'meta' }, '記事の本文にある先頭の画像がそのまま見えます。見せたくない画像は、駅のカードの「詳しく見る」→「非表示にする」で外せます。'))),
+      h('div', { class: 'row' }, btn('画像を保存', () => exportImage('png'), 'small primary'))));
+
+    body.push(h('div', { class: 'ok' }, h('b', {}, 'noteで紹介するなら：'), '②の画像を記事に貼り、そのすぐ下に①のリンクを貼ってください。見た目と「押して記事を読める」の両方が伝わります。'));
+
+    // リンクの細かな設定（折りたたみ）
+    const chk = (label, key) => { const c = h('input', { type: 'checkbox', checked: !!st[key] }); c.addEventListener('change', () => { st[key] = c.checked; save(); openPanel('share', scope); }); return h('label', { class: 'check' }, c, label); };
+    const scopeSel = h('select', {}, h('option', { value: '' }, 'すべての路線'), S.model.lines.map((L) => h('option', { value: 'line:' + L.id, selected: scope.line === L.id }, `路線のみ：${L.name}`)),
+      [10, 30, 60, 100].filter((n) => n < S.model.stations.size).map((n) => h('option', { value: 'recent:' + n, selected: scope.recent === n }, `最近の${n}記事だけ`)));
+    scopeSel.addEventListener('change', () => { const v = scopeSel.value; openPanel('share', v.startsWith('line:') ? { line: v.slice(5) } : v.startsWith('recent:') ? { recent: +v.slice(7) } : {}); });
+    body.push(h('details', { class: 'why', open: !!(scope.line || scope.recent) },
+      h('summary', {}, 'リンクの設定（範囲・含める内容）'),
+      h('div', { class: 'way-inner' },
+        h('label', { class: 'field' }, h('span', {}, 'リンクに入れる範囲'), scopeSel),
+        chk('公開日を含める', 'shareDates'), chk('意外な乗換を含める', 'shareLinks'), chk('振り返り（月別投稿数・路線別記事数）を含める', 'shareAnalysis'),
+        h('p', { class: 'meta' }, `${view.stations.length}記事・${view.lines.length}路線／リンクの長さ ${len.toLocaleString()}文字（目安 ${st.shareLimit.toLocaleString()}文字）`),
+        h('div', { class: 'reason' },
+          h('div', {}, h('b', {}, '含めるもの：'), '駅名・原題・元記事URL・路線・駅順・配置・seed' + (st.shareDates ? '・公開日' : '') + (st.shareLinks ? '・意外な乗換' : '') + (st.shareAnalysis ? '・振り返り（月別数・路線別数）' : '')),
+          h('div', {}, h('b', {}, '含めないもの：'), '本文・抜粋・下書き・図から外した記事・画像・添付・原本ZIP・本文由来の共通語')),
+        h('p', { class: 'meta' }, '圧縮は暗号化ではありません。リンクを知っている人は上の内容を見られます。リンクのデータは「#」より後ろにあり、サーバーへは送られません。'),
+        st.baseUrl && base ? h('p', { class: 'meta' }, '共有リンクの先頭アドレス：' + base + '（メニューで変更できます）') : null,
+        h('p', { class: 'meta' }, 'リンクの長さの上限は、貼る場所（SNS・メッセージアプリなど）ごとに違い、一律の保証はできません。届いたリンクが開けるか、一度確かめてください。'))));
+    return { title: '他の人に見せる', body };
   }
 
   async function copyText(text, ta) {
@@ -1243,7 +1262,9 @@
       S.viewer && !S.viewer.opts.analysis ? null : btn('振り返り', () => openPanel('analysis'), 'small', { id: 'btn-analysis' }),
       btn('駅を検索', () => openPanel('search'), 'small'),
       S.viewer ? null : btn('図の履歴', () => openPanel('history'), 'small')));
-    body.push(h('h4', {}, '書き出し'));
+    if (!S.viewer) body.push(h('div', { class: 'row' }, btn('他の人に見せる（リンク・画像）', () => openPanel('share', {}), 'small primary')));
+    body.push(h('h4', {}, 'ファイルに保存（自分用・パソコン用）'));
+    body.push(h('p', { class: 'meta' }, '人に見せるなら上の「他の人に見せる」がかんたんです。ここは手元に残したり、ほかのアプリで使ったりするためのファイルです。'));
     if (!S.viewer) {
       const ex = h('input', { type: 'checkbox', checked: !!S.project.settings.exportThumbs });
       ex.addEventListener('change', () => { S.project.settings.exportThumbs = ex.checked; save(); });

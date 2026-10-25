@@ -379,6 +379,10 @@ await test('実記事のURLは「noteで読む」で元の記事へ（本人の�
 await test('E2E: 共有パネル（件数・文字数・注意書き）→ URL', async () => {
   await page.evaluate(() => { NT.app.S.project.settings.baseUrl = 'https://example.github.io/note_station/'; });
   await page.click('#btn-share');
+  await page.waitForSelector('#panel-body .way');
+  const ways = await page.$$eval('#panel-body .way h4', (a) => a.map((e) => e.textContent));
+  assert(ways.length === 2 && ways[0].includes('リンク') && ways[1].includes('画像'), JSON.stringify(ways));
+  await page.click('#panel-body details.mini summary');
   await page.waitForSelector('#panel-body textarea');
   const txt = await page.textContent('#panel-body');
   assert(txt.includes('暗号化ではありません') && txt.includes('含めないもの'), 'notice');
